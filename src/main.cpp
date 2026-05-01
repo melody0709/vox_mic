@@ -96,8 +96,8 @@ void audioBridgeThread() {
             }
 
             size_t queueSize = g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE);
-            if (queueSize > 16) {
-                size_t toDrop = queueSize - 8;
+            if (queueSize > 5) {
+                size_t toDrop = queueSize - 3;
                 uint8_t tmp[BLOCK_SIZE];
                 for (size_t i = 0; i < toDrop; i++) {
                     g_wasapiOutput->getRingBuffer()->pop(tmp, BLOCK_SIZE);

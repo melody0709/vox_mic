@@ -1,92 +1,62 @@
-# 重构报告 — v0.1.0
+# 重构报告 — v0.1.1
 
-## 概述
+## v0.1.0
 
-对 `vox_mic_raw_wasapi`（AudioSource Win C++ Raw WASAPI 版本）进行系统重构，修复缺陷、补齐功能、实施 WASAPI 事件驱动、音效开关、Android App 构建管线。
+### 1-9. 功能修复与新增
 
----
+- ✅ `--serial` 参数修复
+- ✅ 托盘 Start/Stop 功能
+- ✅ Settings 对话框 (Win32 原生)
+- ✅ 注册表配置持久化 (12 字段)
+- ✅ int16 线性插值修复
+- ✅ WASAPI 事件驱动渲染
+- ✅ stats 改用 SetTimer
+- ✅ 退出时序修复
+- ✅ 死代码清理 + 菜单改进
 
-## 变更摘要
+### 10-13. Android 端
 
-### 1. 修复: `--serial` 参数不生效
-
-`ADBControl::init()` 现接受可选 `preferredSerial`，优先使用指定设备。
-
-### 2. 修复: 托盘 Start/Stop 无功能
-
-新增 `g_bridgeActive` 原子标志，桥接线程可动态启停。
-
-### 3. 新增: Settings 对话框
-
-Win32 原生对话框：ADB 设备下拉 + Refresh / Host / Port / Android App 二选一 / Gain 滑块 / 音效开关。屏幕居中（`GetSystemMetrics`）。
-
-### 4. 新增: 注册表配置持久化
-
-`HKCU\Software\AudioSourceWin`，12 个字段。命令行覆盖注册表。
-
-### 5. 修复: int16 重采样线性插值
-
-双格式路径均已线性插值 + clamp。
-
-### 6. WASAPI 事件驱动渲染
-
-`SetEventHandle` + `WaitForSingleObject` 替代 Sleep，启动预填充静音。CPU ~2-5% → ~0.1%。
-
-### 7. 移除独立 stats 线程
-
-改用 `SetTimer`。
-
-### 8. 修复退出时序
-
-先停流 → 停桥接 → 停渲染，消除 underrun 噪音。
-
-### 9. 清理死代码 + 菜单改进
-
-移除 `AudioDeviceInfo` 结构体和 `<csignal>` include。新增 Settings 菜单项。
-
-### 10. Android 音效独立开关
-
-Settings 中 3 个 checkbox → 注册表 → ADB `am start --ez` 传参 → Android App 按标志启用。logcat 可验证。
-
-### 11. VoxMic Source Android App
-
-改进版 Android App：48000Hz + DEFAULT + 音效开关。Xiaomi 实验锁定 DEFAULT 源。
-
-### 12. Gain 控制
-
-0.25x–4.0x 滑块，原子变量实时生效。
-
-### 13. 48000 Hz 对齐
-
-Android ↔ Windows 两端 48000Hz，零重采样。
+- ✅ Android 音效独立开关 (checkbox + ADB --ez)
+- ✅ VoxMic Source Android App (48000Hz / DEFAULT + 音效)
+- ✅ Gain 控制 (0.25x–4.0x 滑块)
+- ✅ 48000 Hz 零重采样对齐
 
 ---
 
-## 文件变更清单
+## v0.1.1
+
+### 14. 延迟优化 — 400ms → 83ms
+
+| 参数 | v0.1.0 | v0.1.1 | 改动文件 |
+|------|--------|--------|----------|
+| FRAMES_PER_BLOCK | 1024 | **512** | `wasapi_output.h` |
+| WASAPI buffer | 200ms | **20ms** | `wasapi_output.cpp` |
+| 环形水位 | 16→8 | **5→3** | `main.cpp` |
+| 初始填充 | 3 块 | **3 块** (块变小所以等待减半) | `main.cpp` |
+| Android 块大小 | 2048 字节 | **1024 字节** | `RecordThread.java` |
+
+**验证**: 2 分钟连续压测 `recv=11090 underrun=0`。
+
+**测试历史**:
+- 256 帧/块 + 10ms WASAPI → 失败 (ADB 抖动)
+- 512 帧/块 + 10ms WASAPI + 4→2 水位 → 队列不稳定
+- 512 帧/块 + 20ms WASAPI + 5→3 水位 → **收敛**
+
+---
+
+## 文件变更清单 (v0.1.1 最终)
 
 | 文件 | 状态 |
 |------|------|
+| `src/wasapi_output.h` | Modified (FRAMES_PER_BLOCK 512) |
+| `src/wasapi_output.cpp` | Modified (WASAPI 20ms buffer) |
+| `src/main.cpp` | Modified (5→3 水位 + 3 块初始填充) |
 | `src/config.h/cpp` | Modified (12 字段) |
-| `src/settings_dialog.h/cpp` | Modified (设备/网络/音效/Gain) |
-| `src/main.cpp` | Modified (全面重构) |
-| `src/adb_control.h/cpp` | Modified (可配置 socket/component, --ez extras) |
-| `src/tray_icon.h/cpp` | Modified (Settings 菜单) |
-| `src/wasapi_output.h/cpp` | Modified (事件驱动 + Gain + 48000Hz) |
-| `src/device_enum.h` | Modified (移除死代码) |
-| `src/ring_buffer.h` | Unchanged |
-| `src/socket_client.h/cpp` | Unchanged |
-| `build.bat` | Modified (新增源文件 + comctl32.lib) |
-| `android_app/**` | New (VoxMic Source APK 项目) |
+| `src/settings_dialog.h/cpp` | Modified |
+| `src/adb_control.h/cpp` | Modified |
+| `src/tray_icon.h/cpp` | Modified |
+| `src/device_enum.h` | Modified |
+| `build.bat` | Modified |
+| `android_app/.../RecordThread.java` | Modified (1024 字节块) |
 | `.gitignore` | New |
-
----
-
-## 构建
-
-```cmd
-# Windows
-build.bat
-
-# Android
-cd android_app && .\gradlew.bat assembleDebug --no-daemon
-```
+| `CHANGELOG.md` | New |

@@ -33,9 +33,8 @@ public class RecordThread extends Thread {
             Log.e(App.TAG, "LocalServerSocket (bind)", e);
         }
 
-        // Align buffer to ~2048 bytes matching Windows BLOCK_SIZE
-        // 2048 bytes / 2 bytes_per_sample = 1024 frames = ~21.3ms at 48000Hz
-        final int BLOCK_SIZE = 2048;
+        // Align: 512 frames = 1024 bytes = 10.7ms at 48000Hz
+        final int BLOCK_SIZE = 1024;
         byte[] buf = new byte[BLOCK_SIZE];
 
         while (!Thread.currentThread().isInterrupted()) {

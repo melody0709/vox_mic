@@ -14,7 +14,8 @@
 | Phase 2 | 系统托盘 + 设置对话框 + 配置持久化 + Gain 控制 | ✅ 已完成 |
 | Phase 3 | 按需激活（麦克风监控） | ⬜ 待实施 |
 | Phase 4 | 电源管理 | ⬜ 待实施 |
-| Phase 5 | Android 端重构（AudioSource 实验 + 采样率对齐） | ✅ 已收敛 |
+| Phase 5 | Android 端重构（AudioSource 实验 + 采样率对齐） | ✅ 已完成 |
+| Phase 5L | 延迟优化 (400ms → 83ms) | ✅ 已完成 |
 | Phase 6 | Windows 端音频后处理管线（Speex + 压缩器 + EQ） | ⬜ 待实施 |
 | Phase 7 | WiFi ADB + 断连平滑 + 设备恢复 | ⬜ 待实施 |
 

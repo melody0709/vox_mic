@@ -1,19 +1,17 @@
-# 未来路线图 — v0.1.0+
+# 未来路线图 — v0.1.1+
 
-当前版本 v0.1.0 里程碑已达成。以下为后续推进方向。
-
----
+当前版本 v0.1.1 里程碑已达成。以下为后续推进方向。
 
 ## 已完成 ✅
 
 - ✅ WASAPI 事件驱动渲染 (CPU ~0.1%)
-- ✅ 系统托盘 + Settings 对话框 (设备/网络/App/音效/Gain 全可控)
-- ✅ 配置持久化 (注册表 12 字段)
+- ✅ 系统托盘 + Settings 对话框
+- ✅ 配置持久化 (注册表)
 - ✅ 48000 Hz Android ↔ Windows 对齐 (零重采样)
-- ✅ Gain 滑块 0.25x–4.0x
-- ✅ 音效独立开关 (NS/AEC/AGC checkbox + ADB --ez 传参)
-- ✅ VoxMic Source Android App (可独立构建安装)
-- ✅ Xiaomi 设备 AudioSource 实验记录 (锁定 DEFAULT)
+- ✅ Gain 控制 + 音效独立开关
+- ✅ VoxMic Source Android App
+- ✅ Xiaomi AudioSource 实验
+- ✅ **延迟优化 400ms → 83ms** (v0.1.1)
 
 ---
 

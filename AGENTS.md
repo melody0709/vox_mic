@@ -1,4 +1,4 @@
-# AGENTS.md — v0.1.0
+# AGENTS.md — v0.1.1
 
 ## 项目概述
 
@@ -6,7 +6,7 @@
 
 ## 参考
 
-`../audiosource-win` 是原始 Python 参考项目。本项目基于它用 C++ 重写，加入系统托盘、Settings 对话框、事件驱动渲染、Gain 控制、音效开关。如非必要，请勿参考原项目，以免混淆。
+`../audiosource-win` 是原始 Python 参考项目。本项目基于它用 C++ 重写，加入系统托盘、Settings 对话框、事件驱动渲染、Gain 控制、音效开关、延迟优化。如非必要，请勿参考原项目，以免混淆。
 
 ## 构建
 
@@ -28,7 +28,7 @@ cd android_app
 adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Gradle wrapper（`gradle-wrapper.jar` + `gradlew.bat`）从 `Punch-in Reminder` 项目复制。
+Gradle wrapper 从 `Punch-in Reminder` 项目复制。
 
 ## 运行
 
@@ -38,25 +38,29 @@ build\audiosource.exe --serial <serial>
 
 在 Windows 应用中选择 **CABLE Output** 作为麦克风。
 
+## v0.1.1 延迟优化参数
+
+| 参数 | 值 | 位置 |
+|------|-----|------|
+| FRAMES_PER_BLOCK | 512 | `wasapi_output.h:13` |
+| WASAPI 缓冲 | 20ms | `wasapi_output.cpp:70` |
+| 环形水位 | 5→3 | `main.cpp:87-88` |
+| 初始填充 | 3 块 | `main.cpp:246` |
+| Android BLOCK_SIZE | 1024 字节 | `RecordThread.java` |
+
+总延迟 ~83ms（已验证 2 分钟零 underrun）。
+
 ## 关键技术点
 
 - **输入**: 48000Hz 单声道 int16，通过 ADB TCP 转发从 Android 接收
-- **输出**: 48000Hz 立体声 float32/int16，通过 WASAPI 共享模式写入 VB-CABLE
-- **重采样**: 两端 48000Hz 对齐，`ratio==1.0` 零损失直通；线性插值兼容 44100Hz 旧 App
-- **线程**:
-  - Socket 接收线程 → 无锁环形缓冲区 (128 块 × 2KB) → WASAPI 事件驱动渲染线程
-  - stats 使用 `SetTimer` 定时器，无独立线程
-- **延迟控制**: 队列超过 16 块时丢弃最旧块，维持 ~8 块目标水位
-- **配置**: 注册表 `HKCU\Software\AudioSourceWin` 持久化所有设置
-- **系统托盘**: Start/Stop/Settings/Exit 右键菜单
-- **WASAPI**: 事件驱动（`SetEventHandle` + `WaitForSingleObject`），启动预填充缓冲
-- **Settings 对话框**:
-  - ADB 设备下拉 + Refresh
-  - Host / Port 编辑框
-  - Android App 二选一 (原版 gdzx / VoxMic Source)
-  - Gain 滑块 0.25x–4.0x
-  - ☑ NoiseSuppressor / ☑ AEC / ☑ AGC 独立开关
-- **音效开关机制**: Settings 勾选 → 注册表 → ADB `am start --ez` 传参 → Android App 读取启用
-- **两个 Android App 共存**:
-  - `fr.dzx.audiosource` — 原版 gdzx (44100Hz / DEFAULT / 无音效)
+- **输出**: 48000Hz 立体声 float32/int16，WASAPI 共享模式写入 VB-CABLE
+- **重采样**: ratio==1.0 直通，零损失
+- **线程**: Socket 接收 → 无锁环形缓冲 (128 块 × 1KB) → WASAPI 事件驱动渲染
+- **stats**: SetTimer 定时器，无独立线程
+- **配置**: 注册表 `HKCU\Software\AudioSourceWin` 持久化
+- **Settings 对话框**: 设备/网络/App/Gain/音效 全可控
+- **音效开关**: checkbox → 注册表 → ADB `am start --ez` 传参 → Android App 读取
+- **双 App 共存**:
+  - `fr.dzx.audiosource` — 原版 gdzx (44100Hz / DEFAULT)
   - `com.voxmic.source` — VoxMic Source (48000Hz / DEFAULT / 音效可开关)
+- **延迟控制**: 队列 > 5 块时修剪到 3 块，保持低水位

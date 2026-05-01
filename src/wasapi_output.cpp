@@ -71,7 +71,7 @@ bool WASAPIOutput::initAudioClient(IMMDevice* pDevice) {
     printf("Device format: %u Hz, %u ch, %u bits\n",
         m_pWaveFormat->nSamplesPerSec, m_pWaveFormat->nChannels, m_pWaveFormat->wBitsPerSample);
 
-    REFERENCE_TIME hnsBufferDuration = 2000000; // 200ms (was 1s)
+    REFERENCE_TIME hnsBufferDuration = 200000; // 20ms
     hr = m_pAudioClient->Initialize(
         AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsBufferDuration, 0, m_pWaveFormat, NULL);
     if (FAILED(hr)) {
