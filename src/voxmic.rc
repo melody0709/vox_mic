@@ -1,3 +1,6 @@
 #include "resource.h"
 
 IDI_ICON1 ICON "voxmic.ico"
+IDI_ICON_IDLE ICON "voxmic_idle.ico"
+IDI_ICON_CONNECTED ICON "voxmic_connected.ico"
+IDI_ICON_STREAMING ICON "voxmic_streaming.ico"

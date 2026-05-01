@@ -18,8 +18,8 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     m_nid.uID = ID_TRAYICON;
     m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     m_nid.uCallbackMessage = WM_TRAYICON;
-    m_nid.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1));
-    strcpy_s(m_nid.szTip, "AudioSource Win - Idle");
+    m_nid.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_IDLE));
+    strcpy_s(m_nid.szTip, "VoxMic - Idle");
 
     m_hMenu = CreatePopupMenu();
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_START, "Start Bridge");
@@ -50,14 +50,14 @@ void TrayIcon::updateIcon(bool isStreaming, bool isConnected) {
     if (!m_isCreated) return;
 
     if (isStreaming) {
-        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
-        strcpy_s(m_nid.szTip, "AudioSource Win - Streaming");
+        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON_STREAMING));
+        strcpy_s(m_nid.szTip, "VoxMic - Streaming");
     } else if (isConnected) {
-        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
-        strcpy_s(m_nid.szTip, "AudioSource Win - Connected");
+        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON_CONNECTED));
+        strcpy_s(m_nid.szTip, "VoxMic - Connected");
     } else {
-        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
-        strcpy_s(m_nid.szTip, "AudioSource Win - Idle");
+        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON_IDLE));
+        strcpy_s(m_nid.szTip, "VoxMic - Idle");
     }
 
     Shell_NotifyIconA(NIM_MODIFY, &m_nid);

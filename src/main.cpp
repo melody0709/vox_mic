@@ -146,7 +146,10 @@ void audioBridgeThread() {
             fflush(stdout);
             g_streaming.store(true);
             g_micStreaming.store(true);
-            if (g_trayIcon) g_trayIcon->updateIcon(true, true);
+            if (g_trayIcon) {
+                bool dm = g_demandMode.load(std::memory_order_relaxed);
+                g_trayIcon->updateIcon(!dm, true);
+            }
         }
 
         uint8_t buffer[BLOCK_SIZE];
@@ -188,6 +191,7 @@ void audioBridgeThread() {
 
             if (!micRequested && !demandOff) {
                 g_micStreaming.store(false);
+                if (g_trayIcon && !wasIdle) g_trayIcon->updateIcon(false, true);
                 idleCount++;
                 wasIdle = true;
                 if (idleCount > 50) {
@@ -199,6 +203,7 @@ void audioBridgeThread() {
 
             idleCount = 0;
             g_micStreaming.store(true);
+            if (g_trayIcon && wasIdle) g_trayIcon->updateIcon(true, true);
 
             if (wasIdle) {
                 uint64_t t = g_micOnTick.load(std::memory_order_relaxed);
