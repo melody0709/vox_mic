@@ -112,6 +112,13 @@ void audioBridgeThread() {
 
     if (!g_running.load()) { adb.cleanup(); return; }
     printf("ADB ready, entering Always Hot mode\n");
+    printf("Settings:\n");
+    printf("  Gain = %.2fx\n", g_config.gain);
+    printf("  Android HW: NS=%d AEC=%d AGC=%d\n", ns, aec, agc);
+    printf("  DSP: NR=%d EQ=%d (Presence=+%.1fdB BassCut=%.1fdB) Compressor=%d\n",
+           g_config.nrEnabled, g_config.eqEnabled,
+           g_config.eqPresence, g_config.eqBassCut,
+           g_config.compressorEnabled);
     fflush(stdout);
 
     while (g_running.load()) {
@@ -245,6 +252,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (showSettingsDialog(g_hInstance, hWnd, newConfig)) {
                 g_config = newConfig;
                 syncDspAtomsFromConfig();
+                ShowWindow(GetConsoleWindow(), g_config.debugConsole ? SW_SHOW : SW_HIDE);
                 printf("Settings saved, will take effect on next reconnect\n");
                 fflush(stdout);
             }
@@ -274,6 +282,10 @@ int main(int argc, char* argv[]) {
 
     g_config = Config::load();
     syncDspAtomsFromConfig();
+
+    if (!g_config.debugConsole) {
+        ShowWindow(GetConsoleWindow(), SW_HIDE);
+    }
 
     bool listDevices = false;
     std::string host = g_config.host;

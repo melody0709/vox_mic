@@ -19,6 +19,7 @@ public:
     float eqBassCut = -3.0f;
     bool compressorEnabled = true;
     bool nrEnabled = true;
+    bool debugConsole = true;
 
     static Config load();
     void save() const;

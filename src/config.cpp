@@ -82,6 +82,10 @@ Config Config::load() {
         if (RegQueryValueExA(hKey, "NrEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
             cfg.nrEnabled = (flagVal != 0);
         }
+        size = sizeof(flagVal);
+        if (RegQueryValueExA(hKey, "DebugConsole", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
+            cfg.debugConsole = (flagVal != 0);
+        }
 
         RegCloseKey(hKey);
     }
@@ -126,6 +130,8 @@ void Config::save() const {
         RegSetValueExA(hKey, "CompressorEnabled", 0, REG_DWORD, (const BYTE*)&compVal, sizeof(compVal));
         DWORD nrVal = nrEnabled ? 1 : 0;
         RegSetValueExA(hKey, "NrEnabled", 0, REG_DWORD, (const BYTE*)&nrVal, sizeof(nrVal));
+        DWORD debugVal = debugConsole ? 1 : 0;
+        RegSetValueExA(hKey, "DebugConsole", 0, REG_DWORD, (const BYTE*)&debugVal, sizeof(debugVal));
 
         RegCloseKey(hKey);
     }

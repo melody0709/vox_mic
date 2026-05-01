@@ -28,6 +28,7 @@
 #define IDC_CHECK_NR          2019
 #define IDC_TAB_MAIN          2020
 #define IDC_BTN_RESET         2021
+#define IDC_CHECK_DEBUG       2022
 
 struct SettingsInit {
     Config* pConfig;
@@ -141,6 +142,10 @@ static void LoadConfigToUI(HWND hWnd, const Config* cfg) {
         cfg->compressorEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
         cfg->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+    // Debug
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_SETCHECK,
+        cfg->debugConsole ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -268,6 +273,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         addGen(CreateWindowExA(0, "BUTTON", "AutomaticGainControl",
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
             grpX, grpY, 160, 22, hWnd, (HMENU)IDC_CHECK_AGC, hInst, NULL));
+
+        yBase += 95 + 12;
+
+        addGen(CreateWindowExA(0, "BUTTON", "Debug Console",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            xMargin, yBase, 200, 22, hWnd, (HMENU)IDC_CHECK_DEBUG, hInst, NULL));
 
 
         // --- DSP Tab Controls ---
@@ -436,6 +447,9 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_GETCHECK, 0, 0) == BST_CHECKED);
             pData->pConfig->nrEnabled =
                 (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_GETCHECK, 0, 0) == BST_CHECKED);
+
+            pData->pConfig->debugConsole =
+                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
 
             pData->pConfig->save();
             *(pData->pOk) = true;
