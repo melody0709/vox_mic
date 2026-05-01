@@ -11,6 +11,7 @@
 #include "tray_icon.h"
 #include "config.h"
 #include "settings_dialog.h"
+#include "mic_usage_monitor.h"
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 27183
@@ -27,6 +28,11 @@ std::atomic<float> g_eqPresence{3.0f};
 std::atomic<float> g_eqBassCut{-3.0f};
 std::atomic<bool> g_compressorEnabled{true};
 std::atomic<bool> g_nrEnabled{true};
+static std::atomic<bool> g_micRequested{false};
+static std::atomic<bool> g_micStreaming{false};
+static std::atomic<uint64_t> g_micOnTick{0};
+static MicUsageMonitor g_micMonitor;
+static std::thread g_monitorThread;
 static WASAPIOutput* g_wasapiOutput{nullptr};
 static TrayIcon* g_trayIcon{nullptr};
 static HINSTANCE g_hInstance{nullptr};
@@ -52,6 +58,21 @@ VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
     fflush(stdout);
 }
 
+void micMonitorThread() {
+    bool lastState = false;
+    while (g_running.load(std::memory_order_relaxed)) {
+        bool active = g_micMonitor.isCaptureActive();
+        if (active != lastState) {
+            printf("[Monitor] mic=%s\n", active ? "ON" : "OFF");
+            fflush(stdout);
+            lastState = active;
+            if (active) g_micOnTick.store(GetTickCount64(), std::memory_order_relaxed);
+        }
+        g_micRequested.store(active, std::memory_order_relaxed);
+        Sleep(100);
+    }
+}
+
 void audioBridgeThread() {
     ADBControl adb;
     SocketClient socketClient;
@@ -61,54 +82,112 @@ void audioBridgeThread() {
         return;
     }
 
+    std::string serial = g_config.serial;
+    std::string host = g_config.host;
+    int port = g_config.port;
+    std::string androidComponent = g_config.androidComponent;
+    std::string androidSocket = g_config.androidSocket;
+    bool ns = g_config.nsEnabled;
+    bool aec = g_config.aecEnabled;
+    bool agc = g_config.agcEnabled;
+    syncDspAtomsFromConfig();
+
+    while (g_running.load() && !g_bridgeActive.load()) {
+        Sleep(200);
+    }
+
+    if (!g_running.load()) return;
+
+    while (g_running.load()) {
+        if (!adb.init(serial)) {
+            Sleep(2000);
+            continue;
+        }
+        if (!adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc)) {
+            Sleep(2000);
+            continue;
+        }
+        break;
+    }
+
+    if (!g_running.load()) { adb.cleanup(); return; }
+    printf("ADB ready, entering Always Hot mode\n");
+    fflush(stdout);
+
     while (g_running.load()) {
         if (!g_bridgeActive.load()) {
             Sleep(200);
             continue;
         }
 
-        // Read config on each reconnect cycle so settings changes take effect
-        std::string serial = g_config.serial;
-        std::string host = g_config.host;
-        int port = g_config.port;
-        std::string androidComponent = g_config.androidComponent;
-        std::string androidSocket = g_config.androidSocket;
-        bool ns = g_config.nsEnabled;
-        bool aec = g_config.aecEnabled;
-        bool agc = g_config.agcEnabled;
-        syncDspAtomsFromConfig();
-
-        if (!adb.init(serial)) {
-            Sleep(2000);
-            continue;
-        }
-
-        if (!adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc)) {
-            Sleep(2000);
-            continue;
-        }
-
-        printf("Connecting to %s:%d...\n", host.c_str(), port);
-        fflush(stdout);
-        if (!socketClient.connect(host, port)) {
-            Sleep(1000);
-            continue;
-        }
-
-        printf("Connected! Streaming audio (app=%s)...\n", androidSocket.c_str());
-        fflush(stdout);
-        g_streaming.store(true);
-        if (g_trayIcon) {
-            g_trayIcon->updateIcon(true, true);
+        if (!socketClient.isConnected()) {
+            if (!socketClient.connect(host, port)) {
+                Sleep(200);
+                continue;
+            }
+            printf("Socket connected\n");
+            fflush(stdout);
+            g_streaming.store(true);
+            g_micStreaming.store(true);
+            if (g_trayIcon) g_trayIcon->updateIcon(true, true);
         }
 
         uint8_t buffer[BLOCK_SIZE];
-        while (g_running.load() && g_bridgeActive.load() && socketClient.isConnected()) {
+        int idleCount = 0;
+        int staleCount = 0;
+        bool wasIdle = true;
+
+        while (g_running.load() && g_bridgeActive.load()) {
+            if (!socketClient.isConnected()) break;
+
+            if (!socketClient.waitForData(100)) {
+                staleCount++;
+                if (staleCount > 90) {
+                    printf("Socket stalled (9s), reconnecting\n");
+                    fflush(stdout);
+                    socketClient.disconnect();
+                    g_streaming.store(false);
+                    g_micStreaming.store(false);
+                    if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+                    break;
+                }
+                continue;
+            }
+            staleCount = 0;
+
             int received = socketClient.recvExact(buffer, BLOCK_SIZE);
             if (received <= 0) {
-                printf("Socket disconnected\n");
+                printf("Socket lost, reconnecting\n");
                 fflush(stdout);
+                socketClient.disconnect();
+                g_streaming.store(false);
+                g_micStreaming.store(false);
+                if (g_trayIcon) g_trayIcon->updateIcon(false, false);
                 break;
+            }
+
+            if (!g_micRequested.load(std::memory_order_relaxed)) {
+                g_micStreaming.store(false);
+                idleCount++;
+                wasIdle = true;
+                if (idleCount > 50) {
+                    g_wasapiOutput->getRingBuffer()->reset();
+                    idleCount = 0;
+                }
+                continue;
+            }
+
+            idleCount = 0;
+            g_micStreaming.store(true);
+
+            if (wasIdle) {
+                uint64_t t = g_micOnTick.load(std::memory_order_relaxed);
+                if (t) {
+                    uint64_t now = GetTickCount64();
+                    printf("[DetectLatency] %llums\n", (unsigned long long)(now - t));
+                    fflush(stdout);
+                }
+                wasIdle = false;
             }
 
             size_t queueSize = g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE);
@@ -129,12 +208,9 @@ void audioBridgeThread() {
 
         socketClient.disconnect();
         g_streaming.store(false);
+        g_micStreaming.store(false);
         if (g_trayIcon) {
             g_trayIcon->updateIcon(false, false);
-        }
-
-        if (g_running.load()) {
-            Sleep(1000);
         }
     }
 
@@ -264,12 +340,8 @@ int main(int argc, char* argv[]) {
 
     std::thread bridge(audioBridgeThread);
 
-    while (g_running.load() && wasapiOutput.getRingBuffer()->sizeBlocks(BLOCK_SIZE) < 1) {
-        Sleep(50);
-    }
-    if (g_running.load()) {
-        printf("Buffer filled, starting audio render\n");
-        fflush(stdout);
+    if (g_micMonitor.init()) {
+        g_monitorThread = std::thread(micMonitorThread);
     }
 
     wasapiOutput.start();
@@ -286,6 +358,8 @@ int main(int argc, char* argv[]) {
     g_bridgeActive.store(false);
     g_running.store(false);
     if (bridge.joinable()) bridge.join();
+    if (g_monitorThread.joinable()) g_monitorThread.join();
+    g_micMonitor.shutdown();
     wasapiOutput.stop();
 
     KillTimer(hWnd, 1);

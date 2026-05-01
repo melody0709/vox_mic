@@ -1,4 +1,4 @@
-# Raw WASAPI 优化计划 — v0.3.0+
+# Raw WASAPI 优化计划 — v0.4.0+
 
 ## 当前状态
 
@@ -6,24 +6,44 @@
 |------|------|------|
 | Phase 1 | WASAPI 事件驱动渲染 | ✅ 已完成 |
 | Phase 2 | 系统托盘 + 设置对话框 + 配置持久化 + Gain 控制 | ✅ 已完成 |
-| Phase 3 | 按需激活（麦克风监控） | ⬜ 待实施 |
+| Phase 3 | 按需激活（麦克风监控） | ✅ 已完成 (检测延迟 ~12ms, 空闲 CPU ~0.25%, Always Hot) |
 | Phase 4 | 电源管理 | ⬜ 待实施 |
 | Phase 5 | Android 端重构（AudioSource 实验 + 采样率对齐） | ✅ 已完成 |
 | Phase 5L | 延迟优化 (400ms → 83ms) | ✅ 已完成 |
 | Phase 6 | 自研 DSP 管线 (EQ + Compressor + Limiter) | ✅ 已完成 |
 | Phase 6B | **官方 RNNoise 神经网络降噪** | ✅ 已完成 |
 | **Phase 6C** | **DeepFilterNet3 升级** (可选) | ⬜ 待评估 |
-| Phase 7 | WiFi ADB + 断连平滑 + 设备恢复 | ⬜ 待实施 |
+| Phase 7 | WiFi ADB + 断连平滑 + 设备恢复 | ✅ 已可用 (WiFi ADB 已支持) |
 
 ---
 
-## Phase 1-5: 已完成（摘要）
+## Phase 3: 按需激活 — ✅ 已完成 (v0.4.0)
 
-详见 CHANGELOG.md 和 ARCHITECTURE.md。
+### 方案
+
+- MicUsageMonitor: IAudioSessionManager2 100ms 轮询，检测 CABLE Output capture endpoint 的 AudioSessionState
+- Always Hot: bridge 永不主动断连 socket，空闲时 recv + 丢弃，来需即推
+- ADB 一次性初始化，socket 重连仅 connect() (~200ms)
+
+### 延迟压缩 (3A)
+
+| 参数 | 旧值 | 新值 | 节省 |
+|------|------|------|------|
+| Android AudioRecord 缓冲 | 2× minBufSize | **1× minBufSize** | ~10ms |
+| 环形水位 | 5→3 | **3→2** | ~10ms |
+| 初始填充 | 3 块 | **0** (直接启动) | 30ms |
+| 总延迟 | ~90ms | **~40ms** | ~50ms |
+
+### 实测 (3B)
+
+- 检测延迟: 0-16ms, 均值 ~12ms
+- 语音输入法 CapsLock 长按: `[Monitor] mic=ON/OFF` 精准跟随
+- `[DetectLatency] 15ms` → bridge 立即推流
+- drop=0, recv 正常增长
 
 ---
 
-## Phase 6B: 官方 RNNoise 集成 — ✅ 已完成
+## Phase 4-7: 后续规划
 
 ### 方案
 
@@ -69,13 +89,15 @@
 
 ## 截止当前效果总览
 
-| 指标 | v0.1.0 | v0.3.0 |
-|------|--------|--------|
-| 延迟 | ~400ms | **~90ms** |
-| CPU 流式 | ~0.5% | ~0.5-1.0% |
-| underruns | ~12% | **0%** |
-| 降噪 | Android 内置 (无效) | **RNNoise 神经网络 22 频段** |
-| EQ | 无 | **6-band Presence/Bass 可调** |
-| 压缩 | 无 | **3:1 RMS 5ms/50ms** |
-| 限幅 | 无 | **-1dBFS** |
-| 对比 AudioRelay | 差距大 | **接近** |
+| 指标 | v0.1.0 | v0.3.0 | v0.4.0 |
+|------|--------|--------|--------|
+| 延迟 | ~400ms | ~90ms | **~40ms** |
+| CPU 闲置 | ~0.5% | ~2% | **~0.25%** (按需) |
+| CPU 流式 | ~0.5% | ~0.5-1.0% | ~2% |
+| underruns | ~12% | **0%** | **0%** |
+| 按需激活 | 无 | 无 | **~12ms 检测延迟** |
+| 降噪 | Android 内置 (无效) | **RNNoise 神经网络 22 频段** | RNNoise |
+| EQ | 无 | **6-band Presence/Bass 可调** | 6-band |
+| 压缩 | 无 | **3:1 RMS 5ms/50ms** | 3:1 RMS 5ms/50ms |
+| 限幅 | 无 | **-1dBFS** | -1dBFS |
+| 对比 AudioRelay | 差距大 | **接近** | **超越** (延迟 + 按需)

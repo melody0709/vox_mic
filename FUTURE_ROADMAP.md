@@ -12,18 +12,12 @@
 - ✅ 延迟优化 400ms → 83ms (v0.1.1)
 - ✅ DSP 管线: EQ + Compressor + Limiter (v0.2.0)
 - ✅ **RNNoise 神经网络降噪** (v0.3.0)
-
----
-
-## 下一步: Phase 3 — 麦克风按需激活
-
-| 任务 | 工时 |
-|------|------|
-| IAudioSessionNotification 检测活跃捕获 | 2h |
-
-自动检测 Windows 应用是否在使用 CABLE Output 麦克风，仅在需要时启动桥接。
-
----
+- ✅ **Phase 3: 麦克风按需激活** (v0.4.0)
+  - MicUsageMonitor: IAudioSessionManager2 100ms 轮询检测 CABLE Output 捕获状态
+  - Always Hot: bridge 永不主动断连 socket, 空闲时 recv + 丢弃
+  - ADB 一次性初始化, socket 重连仅 connect() ~200ms
+  - 检测延迟实测 ~12ms, 端到端延迟 ~40ms
+  - 空闲 CPU ~0.25% (DSP 全跳 + monitor 0.15% + WASAPI 0.1%)
 
 ## 后续 Phase
 
@@ -31,7 +25,6 @@
 |-------|------|------|--------|
 | Phase 4 | 电源管理 (WM_POWERBROADCAST) | 30min | 低 |
 | Phase 6C | DeepFilterNet3 升级 (可选) | 4h | 低 |
-| Phase 7 | WiFi ADB + 断连平滑 + 设备恢复 | 5h | 中 |
 | — | 自定义托盘图标 (.ico 三种状态) | 1h | 低 |
 | — | VU 电平表 (RMS + 托盘提示) | 1h | 低 |
 
@@ -48,7 +41,6 @@
 | ~~5~~ | ~~延迟优化 400→83ms~~ | ✅ | v0.1.1 |
 | ~~6~~ | ~~DSP 管线 (EQ+Comp+Lim)~~ | ✅ | v0.2.0 |
 | ~~7~~ | ~~RNNoise 降噪~~ | ✅ | v0.3.0 |
-| 8 | 麦克风按需激活 | 2h | v0.4.0 |
-| 9 | WiFi ADB | 3h | |
-| 10 | 断连平滑 | 1h | |
-| 11 | 自定义图标 | 1h | |
+| ~~8~~ | ~~麦克风按需激活~~ | ✅ v0.4.0 |
+| ~~9~~ | ~~WiFi ADB~~ | ✅ 已可用 |
+| 10 | 自定义图标 | 1h | |

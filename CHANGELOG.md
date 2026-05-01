@@ -1,5 +1,76 @@
 # Changelog
 
+## v0.4.0 (2026-05-01)
+
+### Phase 3: 麦克风按需激活 + 延迟压缩
+
+| 特性 | 说明 |
+|------|------|
+| **MicUsageMonitor** | IAudioSessionManager2 100ms 轮询, 检测 CABLE Output 是否被 Windows 应用占用 |
+| **Always Hot** | Bridge 永不主动断连 socket, 空闲时 recv + 丢弃, 不 push ring buffer |
+| **按需推流** | `g_micRequested` 控制 bridge push/discard, 空闲 CPU ~0.25% |
+| **ADB 一次性启动** | `setupAudioSource` 仅首次调用, socket 重连 ~200ms (不走 ADB) |
+| **延迟压缩 85→40ms** | Android AudioRecord 2×→1× minBufSize, 水位 5→3→3→2, 初始填充 3→0 |
+
+#### 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `src/mic_usage_monitor.h/cpp` | Capture endpoint session 轮询检测 |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/main.cpp` | Monitor 线程 + bridge Always Hot discard 逻辑 + detect latency 计时 |
+| `src/socket_client.h/cpp` | 新增 `waitForData(timeoutMs)` |
+| `src/wasapi_output.h/cpp` | `procUsEma`/`estLatencyMs` QPC 计时 |
+| `src/wasapi_output.cpp:73` | WASAPI 缓冲 200000→100000 hns (实际下限 22ms) |
+| `RecordService.java:101` | AudioRecord 缓冲 `2×→1× minBufSize` |
+| `RecordThread.java` | 新增 `elapsedRealtimeNanos` read 计时日志 |
+| `build.bat` | 新增 `mic_usage_monitor.cpp` 编译 |
+
+#### 参数变更
+
+| 参数 | v0.3.0 | v0.4.0 |
+|------|--------|--------|
+| Android AudioRecord 缓冲 | 2× minBufSize (~20ms) | **1× minBufSize (~10ms)** |
+| 环形水位 | 5→3 | **3→2** |
+| 初始填充 | 3 块 (30ms) | **0 (直接启动)** |
+| WASAPI 缓冲 | 20ms (请求) | 22ms (VB-CABLE 引擎下限) |
+| 总延迟 | ~90ms | **~40ms** (实测) |
+| 检测延迟 | N/A | **~12ms** (实测) |
+| 空闲 CPU | ~2% | **~0.25%** |
+
+#### 新的全局原子变量
+
+| 变量 | 用途 | 线程 |
+|------|------|------|
+| `g_micRequested` | Windows 应用是否在捕获 | monitor → bridge |
+| `g_micStreaming` | 是否正在推流 | bridge → tray icon |
+| `g_micOnTick` | 检测延迟测量时间戳 | monitor → bridge |
+| `procUsEma` / `estLatencyMs` | 单块处理时间 EMA / 估算延迟 | render threads |
+
+#### 实测数据
+
+- 语音输入法 CapsLock 长按 300ms 激活: `[Monitor] mic=ON/OFF` 精准跟随
+- 检测延迟: 0-16ms, 均值 ~12ms
+- 端到端延迟: ~36-46ms (Phone: read ~20ms + HAL ~10ms, PC: queue 1-2 + WASAPI 11ms + DSP 50us)
+- 60s 连续测试: `drop=0 underrun=3049 queue=0~1 proc=47us lat=11~21ms`
+- 空闲 CPU: monitor 0.15% + WASAPI 静音 0.1% = 0.25%
+
+### 线程模型变更
+
+```
+v0.3.0                          v0.4.0
+main                             main
+bridge                           monitor (NEW: 100ms IAudioSessionManager2 轮询)
+render                           bridge (g_micRequested 门控 push/discard)
+                                 render
+```
+
+---
+
 ## v0.3.0 (2026-05-01)
 
 ### 官方 RNNoise 神经网络降噪集成

@@ -1,23 +1,27 @@
-# AudioSource Win (Raw WASAPI) v0.3.0
+# AudioSource Win (Raw WASAPI) v0.4.0
 
-将 Android 手机麦克风用作 Windows 系统麦克风，通过 ADB + VB-CABLE + Raw WASAPI 实现。
+将 Android 手机麦克风用作 Windows 系统麦克风，通过 ADB + VB-CABLE + Raw WASAPI 实现。支持按需激活：有 Windows 应用使用 CABLE Output 时才推流，空闲时不走 DSP。
 
 ## 工作原理
 
 ```
 Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CABLE → Windows 应用
                                                               ↓
+                                    [Phase 3] 按需门控 ← MicUsageMonitor
                                     [DSP] RNNoise → HPF → EQ → Comp → Limiter
 ```
 
-## v0.3.0 核心特性
+## v0.4.0 核心特性
 
 | 特性 | 说明 |
 |------|------|
+| **按需激活** | IAudioSessionManager2 检测 CABLE Output 捕获状态，有应用用才推流 |
+| **Always Hot** | socket 永不主动断连，空闲时丢弃数据，激活延迟 ~12ms |
 | **RNNoise 神经网络降噪** | 官方 xiph/rnnoise v0.2，3 层 GRU，22 Bark 频段独立降噪，BSD-3 |
 | DSP 管线 | HPF 80Hz + 6-band EQ + RMS Compressor + Peak Limiter |
-| 低延迟 | **~90ms** (RNNoise 10ms + 传输 80ms) |
-| Settings 全可控 | NR / EQ / Presence / Bass Cut / Compressor / Gain / 音效 |
+| 低延迟 | **~40ms** (实测) |
+| 空闲 CPU | **~0.25%** (DSP 全跳) |
+| 激活 CPU | ~2% (DSP 全管线) |
 
 ## 系统要求
 
@@ -54,26 +58,27 @@ adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## 性能
 
-| 指标 | v0.3.0 |
+| 指标 | v0.4.0 |
 |------|--------|
-| CPU 空闲 | ~0% |
-| CPU 流式 | ~0.5–1.0% |
+| CPU 空闲 | **~0.25%** |
+| CPU 激活 | ~2% |
 | 内存 | ~15 MB |
-| 延迟 | ~90ms |
+| 端到端延迟 | **~40ms** |
+| 按需激活延迟 | **~12ms** |
 | 二进制 | ~1.5 MB |
 
 ## 延迟预算
 
 | 组件 | 延迟 |
 |------|------|
-| Android 采集 | ~10ms (48000Hz/480 帧) |
-| ADB + Socket | ~10ms |
-| RNNoise 处理 | ~10ms |
-| 环形缓冲 | ~30ms (3 块) |
-| EQ + Comp + Lim | 0ms |
-| WASAPI 缓冲 | ~20ms |
-| VB-CABLE | ~10ms |
-| **总计** | **~90ms** |
+| Android ADC + HAL | ~10ms |
+| AudioRecord read (480fr) | ~10ms |
+| ADB + Socket | ~2ms |
+| 环形缓冲 | ~10ms (1-2 块) |
+| RNNoise + EQ + Comp + Lim | ~50µs |
+| WASAPI 缓冲 | ~11ms |
+| VB-CABLE | ~3ms |
+| **总计** | **~40ms** |
 
 ## 管线效果
 
@@ -88,4 +93,4 @@ adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## 文档
 
-[ARCHITECTURE.md](ARCHITECTURE.md) | [AGENTS.md](AGENTS.md) | [CHANGELOG.md](CHANGELOG.md) | [plan_optimize.md](plan_optimize.md) | [FUTURE_ROADMAP.md](FUTURE_ROADMAP.md)
+[ARCHITECTURE.md](ARCHITECTURE.md) | [AGENTS.md](AGENTS.md) | [CHANGELOG.md](CHANGELOG.md) | [FUTURE_ROADMAP.md](FUTURE_ROADMAP.md) | [plan/completed/](plan/completed/) (历史计划)

@@ -46,6 +46,7 @@ cl /O2 /EHsc /std:c++17 ^
     src\tray_icon.cpp ^
     src\config.cpp ^
     src\settings_dialog.cpp ^
+    src\mic_usage_monitor.cpp ^
     src\dsp\rnnoise\celt_lpc.c ^
     src\dsp\rnnoise\denoise.c ^
     src\dsp\rnnoise\kiss_fft.c ^

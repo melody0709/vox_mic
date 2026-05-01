@@ -73,3 +73,12 @@ int SocketClient::recvExact(uint8_t* buffer, int size) {
     }
     return total;
 }
+
+bool SocketClient::waitForData(int timeoutMs) {
+    if (m_socket == INVALID_SOCKET) return false;
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(m_socket, &fds);
+    timeval tv{ timeoutMs / 1000, (timeoutMs % 1000) * 1000 };
+    return select(0, &fds, NULL, NULL, &tv) > 0;
+}

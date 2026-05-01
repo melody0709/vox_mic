@@ -1,4 +1,4 @@
-# 架构说明 — v0.3.0
+# 架构说明 — v0.4.0
 
 ## 数据流
 
@@ -10,13 +10,18 @@ VoxMic Source App (DEFAULT 源 + 可选 NS/AEC/AGC)
 ADB 转发 (tcp:27183)
     ↓ TCP (960 字节/块 = 480 帧)
 audiosource.exe
-    ├── Socket 接收线程 (Winsock2 recvExact)
-    ├── SPSC 无锁环形缓冲区 (128 块 × 960 字节)
+    ├── MicUsageMonitor 线程 (100ms 轮询 IAudioSessionManager2)
+    │       └→ g_micRequested (atomic<bool>)
+    │
+    ├── Socket 接收线程 (Always Hot, 永不主动断连)
+    │       │   recvExact(960) → g_micRequested ? push : discard
+    │       │
+    │   SPSC 无锁环形缓冲区 (128 块 × 960 字节)
     │       int16 → float32 (480 帧)
     │           ↓
     │   ┌─────────────────────────────────────────┐
     │   │  DSP 管线 (src/dsp/)                    │
-    │   │  1. RNNoise 22-Bark GRU 降噪 + 梳状滤波 │
+    │   │  1. RNNoise 22-Bark GRU 降噪 + 梳状滤波  │
     │   │  2. HPF 80Hz BiQuad IIR                │
     │   │  3. EQ 6-band (Presence/Bass Cut 可调)  │
     │   │  4. RMS Compressor (3:1, 5ms/50ms)      │
@@ -29,22 +34,23 @@ audiosource.exe
             ↓
     VB-CABLE Output
             ↓
-    Windows 应用 (Zoom, Teams, 录音机)
+    Windows 应用 (Zoom, Teams, 录音机, 语音输入法)
 ```
 
 ## 源文件说明
 
 | 文件 | 职责 |
 |------|------|
-| `main.cpp` | 入口、托盘窗口、桥接线程、stats 定时器、DSP 原子变量 sync |
-| `wasapi_output.h/cpp` | WASAPI 事件驱动初始化、渲染循环、Gain + DSP 管线注入 |
+| `main.cpp` | 入口、托盘窗口、bridge 线程 (Always Hot)、monitor 线程、stats 定时器、DSP 原子变量 sync |
+| `wasapi_output.h/cpp` | WASAPI 事件驱动初始化、渲染循环、Gain + DSP 管线注入、QPC 计时 |
 | `device_enum.h/cpp` | WASAPI 设备枚举，VB-CABLE 查找 |
 | `ring_buffer.h` | 无锁 SPSC 环形缓冲区 |
-| `socket_client.h/cpp` | Winsock2 TCP 客户端 |
+| `socket_client.h/cpp` | Winsock2 TCP 客户端 (含 waitForData) |
 | `adb_control.h/cpp` | ADB 命令、设备检测、App 启动、端口转发 |
 | `tray_icon.h/cpp` | 系统托盘 + 右键菜单 |
 | `config.h/cpp` | 注册表持久化 (**17 字段**) |
 | `settings_dialog.h/cpp` | Win32 设置对话框 (设备/网络/App/音效/**DSP**) |
+| **`mic_usage_monitor.h/cpp`** | Phase 3: IAudioSessionManager2 轮询检测 CABLE Output 捕获状态 |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
 | **`dsp/pipeline.h`** | DSP 链调度 (RNNoise→HPF→EQ→Comp→Limiter) |
 | **`dsp/rnnoise/` (27 文件)** | 官方 RNNoise v0.2 源码 + 预生成模型 (来源: werman fork) |
@@ -87,18 +93,37 @@ audiosource.exe
 | Bass Cut | -3.0 dB | `g_eqBassCut` | slider -6–0dB |
 | Comp Enable | true | `g_compressorEnabled` | checkbox |
 
+## Phase 3: 按需激活
+
+| 参数 | 值 | 原子变量 | 线程 |
+|------|-----|----------|------|
+| Monitor 轮询 | 100ms IAudioSessionManager2 | `g_micRequested` | monitor |
+| 推流门控 | discard when `!g_micRequested` | `g_micStreaming` | bridge → tray |
+| 检测延迟 | ~12ms (实测) | `g_micOnTick` | monitor → bridge |
+| 空闲 ring buffer reset | 5s (50 × 100ms) | — | bridge |
+| Socket stall 断连 | 9s (90 × 100ms) | — | bridge |
+
+## 线程模型
+
+```
+main thread:         消息泵 + SetTimer(stats, 5s)
+monitor thread:      100ms 轮询 IAudioSessionManager2 → g_micRequested (Phase 3)
+bridge thread:       ADB 一次性初始化 + Socket Always Hot → g_micRequested 门控 → ring buffer push/discard
+render thread:       事件驱动 ring buffer pop → int16→float → DspPipeline (47µs/块) → WASAPI write
+```
+
 ## 延迟预算
 
 | 组件 | 延迟 |
 |------|------|
-| Android 采集 | ~10ms (48000Hz/480 帧) |
-| ADB + Socket | ~10ms |
-| RNNoise 处理 | ~10ms |
-| 环形缓冲区 | ~30ms (3 块) |
-| EQ + Comp + Limiter | 0ms (零额外延迟) |
-| WASAPI 缓冲区 | ~20ms |
-| VB-CABLE | ~10ms |
-| **总计** | **~90ms** |
+| Android ADC + HAL | ~10ms |
+| AudioRecord read (480fr) | ~10ms |
+| ADB + Socket | ~2ms |
+| 环形缓冲区 | ~10ms (1-2 块) |
+| RNNoise + EQ + Comp + Limiter | ~50µs (实测) |
+| WASAPI 缓冲区 | ~11ms (VB-CABLE 22ms 半缓冲) |
+| VB-CABLE | ~3ms |
+| **总计** | **~40ms** (实测) |
 
 ## WASAPI 事件驱动
 

@@ -22,6 +22,7 @@ public:
     bool isConnected() const;
 
     int recvExact(uint8_t* buffer, int size);
+    bool waitForData(int timeoutMs);
 
 private:
     SOCKET m_socket{INVALID_SOCKET};
