@@ -7,7 +7,7 @@
 #include <commctrl.h>
 
 #define SETTINGS_CLASS "AudioSourceSettingsClass"
-#define IDC_COMBO_DEVICE     2001
+#define IDC_COMBO_DEVICE      2001
 #define IDC_HOST_EDIT         2002
 #define IDC_PORT_EDIT         2003
 #define IDC_BTN_REFRESH       2004
@@ -26,6 +26,8 @@
 #define IDC_LABEL_BASS        2017
 #define IDC_CHECK_COMP        2018
 #define IDC_CHECK_NR          2019
+#define IDC_TAB_MAIN          2020
+#define IDC_BTN_RESET         2021
 
 struct SettingsInit {
     Config* pConfig;
@@ -35,6 +37,9 @@ struct SettingsInit {
 struct SettingsDialogData {
     Config* pConfig;
     bool*   pOk;
+    HWND hTab;
+    std::vector<HWND> tabGeneralControls;
+    std::vector<HWND> tabDspControls;
 };
 
 static void refreshDeviceList(HWND hCombo, const std::string& currentSerial) {
@@ -86,6 +91,58 @@ static void updateBassLabel(HWND hWnd) {
     SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_BASS), buf);
 }
 
+static void showTabControls(const SettingsDialogData* pData, int tabIndex) {
+    int swGen = (tabIndex == 0) ? SW_SHOW : SW_HIDE;
+    int swDsp = (tabIndex == 1) ? SW_SHOW : SW_HIDE;
+    for (HWND h : pData->tabGeneralControls) {
+        ShowWindow(h, swGen);
+    }
+    for (HWND h : pData->tabDspControls) {
+        ShowWindow(h, swDsp);
+    }
+}
+
+static void LoadConfigToUI(HWND hWnd, const Config* cfg) {
+    // Gain
+    int gainPos = (int)(cfg->gain * 100.0f);
+    if (gainPos < 25) gainPos = 25;
+    if (gainPos > 400) gainPos = 400;
+    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_GAIN), TBM_SETPOS, TRUE, gainPos);
+
+    char gainText[32];
+    snprintf(gainText, sizeof(gainText), "%.2fx", cfg->gain);
+    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_GAIN), gainText);
+
+    // Hardware Algorithms
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_SETCHECK,
+        cfg->nsEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_SETCHECK,
+        cfg->aecEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_SETCHECK,
+        cfg->agcEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+    // DSP
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_SETCHECK,
+        cfg->eqEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+    int presPos = (int)(cfg->eqPresence * 10.0f);
+    if (presPos < 0) presPos = 0;
+    if (presPos > 60) presPos = 60;
+    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_SETPOS, TRUE, presPos);
+    updatePresLabel(hWnd);
+
+    int bassPos = (int)(-cfg->eqBassCut * 10.0f);
+    if (bassPos < 0) bassPos = 0;
+    if (bassPos > 60) bassPos = 60;
+    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_SETPOS, TRUE, bassPos);
+    updateBassLabel(hWnd);
+
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_SETCHECK,
+        cfg->compressorEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
+        cfg->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
 
@@ -99,54 +156,71 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
 
         HINSTANCE hInst = pCreate->hInstance;
-        int xMargin = 16;
-        int yBase = 12;
-        int lblW = 80;
+        
+        // Create Tab Control
+        pData->hTab = CreateWindowExA(0, WC_TABCONTROLA, "",
+            WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
+            10, 10, 465, 360, hWnd, (HMENU)IDC_TAB_MAIN, hInst, NULL);
+            
+        TCITEMA tie = {};
+        tie.mask = TCIF_TEXT;
+        tie.pszText = (LPSTR)"General";
+        SendMessageA(pData->hTab, TCM_INSERTITEMA, 0, (LPARAM)&tie);
+        tie.pszText = (LPSTR)"DSP";
+        SendMessageA(pData->hTab, TCM_INSERTITEMA, 1, (LPARAM)&tie);
+
+        int xMargin = 25;
+        int yBase = 45;
+        int lblW = 100;
         int ctrlX = xMargin + lblW + 8;
+        
+        auto addGen = [&](HWND h) { pData->tabGeneralControls.push_back(h); return h; };
+        auto addDsp = [&](HWND h) { pData->tabDspControls.push_back(h); return h; };
 
-        CreateWindowExA(0, "STATIC", "ADB Device:",
+        // --- General Tab Controls ---
+        addGen(CreateWindowExA(0, "STATIC", "ADB Device:",
             WS_CHILD | WS_VISIBLE,
-            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL);
+            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        HWND hCombo = CreateWindowExA(0, "COMBOBOX", "",
+        HWND hCombo = addGen(CreateWindowExA(0, "COMBOBOX", "",
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            ctrlX, yBase, 195, 200, hWnd, (HMENU)IDC_COMBO_DEVICE, hInst, NULL);
+            ctrlX, yBase, 195, 200, hWnd, (HMENU)IDC_COMBO_DEVICE, hInst, NULL));
 
-        CreateWindowExA(0, "BUTTON", "Refresh",
+        addGen(CreateWindowExA(0, "BUTTON", "Refresh",
             WS_CHILD | WS_VISIBLE,
             ctrlX + 205, yBase - 1, 55, 24,
-            hWnd, (HMENU)IDC_BTN_REFRESH, hInst, NULL);
+            hWnd, (HMENU)IDC_BTN_REFRESH, hInst, NULL));
 
         yBase += 32;
 
-        CreateWindowExA(0, "STATIC", "Host:",
+        addGen(CreateWindowExA(0, "STATIC", "Host:",
             WS_CHILD | WS_VISIBLE,
-            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL);
+            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", pData->pConfig->host.c_str(),
+        addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", pData->pConfig->host.c_str(),
             WS_CHILD | WS_VISIBLE,
-            ctrlX, yBase + 1, 130, 21, hWnd, (HMENU)IDC_HOST_EDIT, hInst, NULL);
+            ctrlX, yBase + 1, 130, 21, hWnd, (HMENU)IDC_HOST_EDIT, hInst, NULL));
 
         yBase += 32;
 
-        CreateWindowExA(0, "STATIC", "Port:",
+        addGen(CreateWindowExA(0, "STATIC", "Port:",
             WS_CHILD | WS_VISIBLE,
-            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL);
+            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
         std::string portStr = std::to_string(pData->pConfig->port);
-        CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", portStr.c_str(),
+        addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", portStr.c_str(),
             WS_CHILD | WS_VISIBLE,
-            ctrlX, yBase + 1, 90, 21, hWnd, (HMENU)IDC_PORT_EDIT, hInst, NULL);
+            ctrlX, yBase + 1, 90, 21, hWnd, (HMENU)IDC_PORT_EDIT, hInst, NULL));
 
         yBase += 32;
 
-        CreateWindowExA(0, "STATIC", "Android App:",
+        addGen(CreateWindowExA(0, "STATIC", "Android App:",
             WS_CHILD | WS_VISIBLE,
-            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL);
+            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        HWND hAppCombo = CreateWindowExA(0, "COMBOBOX", "",
+        HWND hAppCombo = addGen(CreateWindowExA(0, "COMBOBOX", "",
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            ctrlX, yBase, 250, 200, hWnd, (HMENU)IDC_COMBO_ANDROID_APP, hInst, NULL);
+            ctrlX, yBase, 250, 200, hWnd, (HMENU)IDC_COMBO_ANDROID_APP, hInst, NULL));
 
         SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"Original AudioSource (gdzx) - DEFAULT / no effects");
         SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"VoxMic Source (improved) - 48000Hz / DEFAULT + NS + AEC");
@@ -157,136 +231,127 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         yBase += 32;
 
-        CreateWindowExA(0, "STATIC", "Gain:",
+        addGen(CreateWindowExA(0, "STATIC", "Gain:",
             WS_CHILD | WS_VISIBLE,
-            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL);
+            xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        HWND hGainLabel = CreateWindowExA(0, "STATIC", "",
+        HWND hGainLabel = addGen(CreateWindowExA(0, "STATIC", "",
             WS_CHILD | WS_VISIBLE,
-            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_GAIN, hInst, NULL);
+            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_GAIN, hInst, NULL));
 
-        HWND hGainTrackbar = CreateWindowExA(0, TRACKBAR_CLASSA, "",
+        HWND hGainTrackbar = addGen(CreateWindowExA(0, TRACKBAR_CLASSA, "",
             WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_TOOLTIPS,
-            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_GAIN, hInst, NULL);
+            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_GAIN, hInst, NULL));
         SendMessageA(hGainTrackbar, TBM_SETRANGE, TRUE, MAKELONG(25, 400));
         SendMessageA(hGainTrackbar, TBM_SETTICFREQ, 25, 0);
-        int gainPos = (int)(pData->pConfig->gain * 100.0f);
-        if (gainPos < 25) gainPos = 25;
-        if (gainPos > 400) gainPos = 400;
-        SendMessageA(hGainTrackbar, TBM_SETPOS, TRUE, gainPos);
-
-        char gainText[32];
-        snprintf(gainText, sizeof(gainText), "%.2fx", pData->pConfig->gain);
-        SetWindowTextA(hGainLabel, gainText);
-
-        yBase += 32;
-
-        CreateWindowExA(0, "BUTTON", "NoiseSuppressor",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            ctrlX, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NS, hInst, NULL);
-        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_SETCHECK,
-            pData->pConfig->nsEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-
-        CreateWindowExA(0, "BUTTON", "AcousticEchoCanceler",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            ctrlX + 170, yBase, 180, 22, hWnd, (HMENU)IDC_CHECK_AEC, hInst, NULL);
-        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_SETCHECK,
-            pData->pConfig->aecEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-
-        yBase += 24;
-
-        CreateWindowExA(0, "BUTTON", "AutomaticGainControl",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            ctrlX, yBase, 160, 22, hWnd, (HMENU)IDC_CHECK_AGC, hInst, NULL);
-        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_SETCHECK,
-            pData->pConfig->agcEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 
         yBase += 38;
 
-        CreateWindowExA(0, "STATIC", "DSP Audio Enhance:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin, yBase, lblW + 100, 22, hWnd, NULL, hInst, NULL);
+        // GroupBox for Android Hardware Algorithms
+        addGen(CreateWindowExA(0, "BUTTON", "Android Hardware Algorithms",
+            WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+            xMargin, yBase, 420, 95, hWnd, NULL, hInst, NULL));
+            
+        int grpX = xMargin + 15;
+        int grpY = yBase + 25;
 
-        yBase += 26;
-
-        CreateWindowExA(0, "BUTTON", "EQ Enable",
+        addGen(CreateWindowExA(0, "BUTTON", "NoiseSuppressor",
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            ctrlX, yBase, 100, 22, hWnd, (HMENU)IDC_CHECK_EQ, hInst, NULL);
-        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_SETCHECK,
-            pData->pConfig->eqEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+            grpX, grpY, 150, 22, hWnd, (HMENU)IDC_CHECK_NS, hInst, NULL));
 
-        yBase += 30;
+        addGen(CreateWindowExA(0, "BUTTON", "AcousticEchoCanceler",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            grpX + 170, grpY, 180, 22, hWnd, (HMENU)IDC_CHECK_AEC, hInst, NULL));
 
-        CreateWindowExA(0, "STATIC", "Presence:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL);
+        grpY += 30;
 
-        CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | WS_VISIBLE,
-            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_PRES, hInst, NULL);
+        addGen(CreateWindowExA(0, "BUTTON", "AutomaticGainControl",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            grpX, grpY, 160, 22, hWnd, (HMENU)IDC_CHECK_AGC, hInst, NULL));
 
-        HWND hPresTrackbar = CreateWindowExA(0, TRACKBAR_CLASSA, "",
-            WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_TOOLTIPS,
-            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_PRES, hInst, NULL);
+
+        // --- DSP Tab Controls ---
+        yBase = 55;
+
+        addDsp(CreateWindowExA(0, "BUTTON", "EQ Enable",
+            WS_CHILD | BS_AUTOCHECKBOX, // Not visible initially
+            xMargin, yBase, 100, 22, hWnd, (HMENU)IDC_CHECK_EQ, hInst, NULL));
+
+        yBase += 35;
+
+        addDsp(CreateWindowExA(0, "STATIC", "Presence:",
+            WS_CHILD,
+            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL));
+
+        addDsp(CreateWindowExA(0, "STATIC", "",
+            WS_CHILD,
+            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_PRES, hInst, NULL));
+
+        HWND hPresTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
+            WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
+            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_PRES, hInst, NULL));
         SendMessageA(hPresTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
         SendMessageA(hPresTrackbar, TBM_SETTICFREQ, 10, 0);
-        int presPos = (int)(pData->pConfig->eqPresence * 10.0f);
-        if (presPos < 0) presPos = 0;
-        if (presPos > 60) presPos = 60;
-        SendMessageA(hPresTrackbar, TBM_SETPOS, TRUE, presPos);
 
-        updatePresLabel(hWnd);
+        yBase += 35;
 
-        yBase += 30;
+        addDsp(CreateWindowExA(0, "STATIC", "Bass Cut:",
+            WS_CHILD,
+            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL));
 
-        CreateWindowExA(0, "STATIC", "Bass Cut:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL);
+        addDsp(CreateWindowExA(0, "STATIC", "",
+            WS_CHILD,
+            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_BASS, hInst, NULL));
 
-        CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | WS_VISIBLE,
-            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_BASS, hInst, NULL);
-
-        HWND hBassTrackbar = CreateWindowExA(0, TRACKBAR_CLASSA, "",
-            WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_TOOLTIPS,
-            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_BASS, hInst, NULL);
+        HWND hBassTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
+            WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
+            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_BASS, hInst, NULL));
         SendMessageA(hBassTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
         SendMessageA(hBassTrackbar, TBM_SETTICFREQ, 10, 0);
-        int bassPos = (int)(-pData->pConfig->eqBassCut * 10.0f);
-        if (bassPos < 0) bassPos = 0;
-        if (bassPos > 60) bassPos = 60;
-        SendMessageA(hBassTrackbar, TBM_SETPOS, TRUE, bassPos);
-
-        updateBassLabel(hWnd);
-
-        yBase += 30;
-
-        CreateWindowExA(0, "BUTTON", "Compressor Enable",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            ctrlX, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_COMP, hInst, NULL);
-        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_SETCHECK,
-            pData->pConfig->compressorEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-
-        yBase += 30;
-
-        CreateWindowExA(0, "BUTTON", "Noise Reduction",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            ctrlX, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL);
-        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
-            pData->pConfig->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 
         yBase += 40;
 
+        addDsp(CreateWindowExA(0, "BUTTON", "Compressor Enable",
+            WS_CHILD | BS_AUTOCHECKBOX,
+            xMargin, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_COMP, hInst, NULL));
+
+        yBase += 35;
+
+        addDsp(CreateWindowExA(0, "BUTTON", "Noise Reduction",
+            WS_CHILD | BS_AUTOCHECKBOX,
+            xMargin, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL));
+
+        // Load values into UI
+        LoadConfigToUI(hWnd, pData->pConfig);
+
+        // Buttons at the bottom
+        int btnY = 385;
+        
+        CreateWindowExA(0, "BUTTON", "Reset to Defaults",
+            WS_CHILD | WS_VISIBLE,
+            10, btnY, 120, 25, hWnd, (HMENU)IDC_BTN_RESET, hInst, NULL);
         CreateWindowExA(0, "BUTTON", "OK",
             WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-            130, yBase, 75, 25, hWnd, (HMENU)IDC_BTN_OK, hInst, NULL);
+            155, btnY, 75, 25, hWnd, (HMENU)IDC_BTN_OK, hInst, NULL);
 
         CreateWindowExA(0, "BUTTON", "Cancel",
             WS_CHILD | WS_VISIBLE,
-            215, yBase, 75, 25, hWnd, (HMENU)IDC_BTN_CANCEL, hInst, NULL);
+            245, btnY, 75, 25, hWnd, (HMENU)IDC_BTN_CANCEL, hInst, NULL);
 
         refreshDeviceList(hCombo, pData->pConfig->serial);
 
+        // Explicitly set font for all controls to match dialog default if possible
+        // (Optional, omitted for simplicity unless requested)
+
+        return 0;
+    }
+
+    case WM_NOTIFY: {
+        LPNMHDR lpnmhdr = (LPNMHDR)lParam;
+        if (lpnmhdr->idFrom == IDC_TAB_MAIN && lpnmhdr->code == TCN_SELCHANGE) {
+            int sel = (int)SendMessageA(pData->hTab, TCM_GETCURSEL, 0, 0);
+            showTabControls(pData, sel);
+        }
         return 0;
     }
 
@@ -313,6 +378,11 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         case IDC_BTN_REFRESH:
             refreshDeviceList(hCombo, pData->pConfig->serial);
             break;
+        case IDC_BTN_RESET: {
+            Config defaultCfg;
+            LoadConfigToUI(hWnd, &defaultCfg);
+            break;
+        }
         case IDC_BTN_OK: {
             char buf[256];
             int idx = (int)SendMessageA(hCombo, CB_GETCURSEL, 0, 0);
@@ -396,7 +466,7 @@ bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
     static bool classRegistered = false;
     static bool ccInitialized = false;
     if (!ccInitialized) {
-        INITCOMMONCONTROLSEX icc = { sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES };
+        INITCOMMONCONTROLSEX icc = { sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES | ICC_TAB_CLASSES };
         InitCommonControlsEx(&icc);
         ccInitialized = true;
     }
@@ -422,7 +492,7 @@ bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
         SETTINGS_CLASS,
         "AudioSource Win - Settings",
         WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0, 0, 500, 520,
+        0, 0, 500, 460,
         hParent, NULL, hInstance, &init);
 
     if (!hWnd) return false;
@@ -448,8 +518,12 @@ bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
                 PostQuitMessage((int)msg.wParam);
             break;
         }
-        TranslateMessage(&msg);
-        DispatchMessageA(&msg);
+        
+        // Handling tab key navigation if needed (optional for basic dialog)
+        if (!IsDialogMessageA(hWnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
     }
 
     EnableWindow(hParent, TRUE);

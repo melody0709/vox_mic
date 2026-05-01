@@ -10,10 +10,10 @@ public:
     std::string androidSocket = "audiosource";
     std::string androidComponent = "fr.dzx.audiosource/.MainActivity";
     int androidAppPreset = 0;
-    float gain = 1.5f;
-    bool nsEnabled = true;
+    float gain = 1.0f;
+    bool nsEnabled = false;
     bool aecEnabled = true;
-    bool agcEnabled = true;
+    bool agcEnabled = false;
     bool eqEnabled = true;
     float eqPresence = 3.0f;
     float eqBassCut = -3.0f;
