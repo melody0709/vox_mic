@@ -70,7 +70,7 @@ bool WASAPIOutput::initAudioClient(IMMDevice* pDevice) {
     printf("Device format: %u Hz, %u ch, %u bits\n",
         m_pWaveFormat->nSamplesPerSec, m_pWaveFormat->nChannels, m_pWaveFormat->wBitsPerSample);
 
-    REFERENCE_TIME hnsBufferDuration = 200000; // 20ms
+    REFERENCE_TIME hnsBufferDuration = 100000; // 10ms
     hr = m_pAudioClient->Initialize(
         AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsBufferDuration, 0, m_pWaveFormat, NULL);
     if (FAILED(hr)) {
@@ -166,6 +166,11 @@ void WASAPIOutput::renderThread() {
     printf("Audio render started (event-driven)\n");
     fflush(stdout);
 
+    LARGE_INTEGER qpcFreq;
+    QueryPerformanceFrequency(&qpcFreq);
+    double localProcUsEma = 0;
+    size_t procCount = 0;
+
     while (m_running.load(std::memory_order_relaxed)) {
         DWORD waitResult = WaitForSingleObject(m_hEvent, 2000);
         if (waitResult != WAIT_OBJECT_0) {
@@ -185,6 +190,9 @@ void WASAPIOutput::renderThread() {
             BYTE* pData = nullptr;
             hr = m_pRenderClient->GetBuffer(outFrames, &pData);
             if (FAILED(hr)) break;
+
+            LARGE_INTEGER t1;
+            QueryPerformanceCounter(&t1);
 
             if (m_ringBuffer.pop((uint8_t*)monoBuffer, BLOCK_SIZE)) {
                 for (int i = 0; i < FRAMES_PER_BLOCK; i++)
@@ -235,6 +243,17 @@ void WASAPIOutput::renderThread() {
 
             m_pRenderClient->ReleaseBuffer(outFrames, 0);
             avail -= outFrames;
+
+            LARGE_INTEGER t2;
+            QueryPerformanceCounter(&t2);
+            double procUs = (double)(t2.QuadPart - t1.QuadPart) * 1e6 / (double)qpcFreq.QuadPart;
+            localProcUsEma = (localProcUsEma * 0.95) + (procUs * 0.05);
+            procCount++;
+
+            size_t q = m_ringBuffer.sizeBlocks(BLOCK_SIZE);
+            double est = (double)q * 10.0 + localProcUsEma * 0.001 + 11.0;
+            estLatencyMs.store(est, std::memory_order_relaxed);
+            procUsEma.store(localProcUsEma, std::memory_order_relaxed);
         }
 
         if (FAILED(hr)) break;

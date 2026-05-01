@@ -98,7 +98,7 @@ public class RecordService extends Service {
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_ENCODING,
-                2 * minBufSize);
+                1 * minBufSize);
 
         if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
             Log.e(App.TAG, "Failed to initialize AudioRecord");

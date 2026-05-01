@@ -42,11 +42,13 @@ static void syncDspAtomsFromConfig() {
 
 VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
-    printf("[Stats] recv=%d drop=%d underrun=%d queue=%zu\n",
+    printf("[Stats] recv=%d drop=%d underrun=%d queue=%zu proc=%.0fus lat=%.1fms\n",
         g_wasapiOutput->receivedBlocks.load(),
         g_wasapiOutput->droppedBlocks.load(),
         g_wasapiOutput->underruns.load(),
-        g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE));
+        g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE),
+        g_wasapiOutput->procUsEma.load(),
+        g_wasapiOutput->estLatencyMs.load());
     fflush(stdout);
 }
 
@@ -110,8 +112,8 @@ void audioBridgeThread() {
             }
 
             size_t queueSize = g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE);
-            if (queueSize > 5) {
-                size_t toDrop = queueSize - 3;
+            if (queueSize > 3) {
+                size_t toDrop = queueSize - 2;
                 uint8_t tmp[BLOCK_SIZE];
                 for (size_t i = 0; i < toDrop; i++) {
                     g_wasapiOutput->getRingBuffer()->pop(tmp, BLOCK_SIZE);
@@ -262,7 +264,7 @@ int main(int argc, char* argv[]) {
 
     std::thread bridge(audioBridgeThread);
 
-    while (g_running.load() && wasapiOutput.getRingBuffer()->sizeBlocks(BLOCK_SIZE) < 3) {
+    while (g_running.load() && wasapiOutput.getRingBuffer()->sizeBlocks(BLOCK_SIZE) < 1) {
         Sleep(50);
     }
     if (g_running.load()) {

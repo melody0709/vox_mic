@@ -5,6 +5,7 @@ import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.Build;
+import android.os.SystemClock;
 import android.system.Os;
 import android.util.Log;
 
@@ -19,6 +20,7 @@ public class RecordThread extends Thread {
     private final RecordService service;
     private final AudioRecord recorder;
     private volatile LocalServerSocket serverSocket;
+    private long mBlockCount = 0;
 
     RecordThread(RecordService service, AudioRecord recorder) {
         this.service = service;
@@ -47,14 +49,22 @@ public class RecordThread extends Thread {
                 recorder.startRecording();
 
                 while (!Thread.currentThread().isInterrupted()) {
+                    long t1 = SystemClock.elapsedRealtimeNanos();
                     int totalRead = 0;
                     while (totalRead < BLOCK_SIZE) {
                         int r = recorder.read(buf, totalRead, BLOCK_SIZE - totalRead);
                         if (r < 0) break;
                         totalRead += r;
                     }
+                    long t2 = SystemClock.elapsedRealtimeNanos();
                     if (totalRead <= 0) break;
                     socket.getOutputStream().write(buf, 0, totalRead);
+
+                    if (mBlockCount++ % 100 == 0) {
+                        float readMs = (float)(t2 - t1) * 1e-6f;
+                        Log.i(App.TAG, String.format("[Latency] read=%.1fms",
+                            readMs));
+                    }
                 }
             } catch (IOException e) {
                 Log.e(App.TAG, "LocalSocket", e);
