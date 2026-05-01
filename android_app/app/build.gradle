@@ -1,0 +1,33 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.voxmic.source'
+    defaultConfig {
+        applicationId "com.voxmic.source"
+        minSdkVersion 14
+        targetSdkVersion 34
+        compileSdk 34
+        versionCode 1
+        versionName '1.0'
+        vectorDrawables { useSupportLibrary true }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.2.0'
+    implementation 'androidx.vectordrawable:vectordrawable:1.1.0'
+}

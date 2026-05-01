@@ -31,8 +31,11 @@ if defined VS_PATH (
     )
 )
 
+if not exist "build" mkdir build
+
 echo Compiling...
 cl /O2 /EHsc /std:c++17 ^
+    /Fo:build\ ^
     /W4 /WX- ^
     src\main.cpp ^
     src\wasapi_output.cpp ^
@@ -40,17 +43,19 @@ cl /O2 /EHsc /std:c++17 ^
     src\socket_client.cpp ^
     src\adb_control.cpp ^
     src\tray_icon.cpp ^
-    /Fe:audiosource.exe ^
-    /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib
+    src\config.cpp ^
+    src\settings_dialog.cpp ^
+    /Fe:build\audiosource.exe ^
+    /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib
 
 if %ERRORLEVEL% EQU 0 (
     echo.
-    echo Build successful: audiosource.exe
+    echo Build successful: build\audiosource.exe
     echo.
     echo Usage:
-    echo   audiosource.exe                 Start audio bridge
-    echo   audiosource.exe --list-devices  List audio devices
-    echo   audiosource.exe --help          Show help
+    echo   build\audiosource.exe                 Start audio bridge
+    echo   build\audiosource.exe --list-devices  List audio devices
+    echo   build\audiosource.exe --help          Show help
 ) else (
     echo.
     echo Build FAILED!

@@ -23,6 +23,7 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     m_hMenu = CreatePopupMenu();
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_START, "Start Bridge");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_STOP, "Stop Bridge");
+    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings...");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_EXIT, "Exit");
 

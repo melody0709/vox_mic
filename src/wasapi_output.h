@@ -8,7 +8,7 @@
 #include <thread>
 #include "ring_buffer.h"
 
-#define SAMPLE_RATE 44100
+#define SAMPLE_RATE 48000
 #define INPUT_CHANNELS 1
 #define FRAMES_PER_BLOCK 1024
 #define BYTES_PER_SAMPLE 2
@@ -53,4 +53,5 @@ private:
     SPSCRingBuffer m_ringBuffer{BLOCK_SIZE * RING_BUFFER_BLOCKS};
     std::thread m_renderThread;
     std::atomic<bool> m_running{false};
+    HANDLE m_hEvent{nullptr};
 };

@@ -55,12 +55,15 @@ std::vector<std::string> ADBControl::getDevices() const {
     return devices;
 }
 
-bool ADBControl::startApp() {
+bool ADBControl::startApp(const std::string& component, bool ns, bool aec, bool agc) {
     std::string cmd = "adb";
     if (!m_serial.empty()) {
         cmd += " -s " + m_serial;
     }
-    cmd += " shell am start -n fr.dzx.audiosource/.MainActivity";
+    cmd += " shell am start -n " + component
+        + " --ez ns_enabled " + (ns ? "true" : "false")
+        + " --ez aec_enabled " + (aec ? "true" : "false")
+        + " --ez agc_enabled " + (agc ? "true" : "false");
     try {
         std::string result = runCommand(cmd);
         return result.find("Error") == std::string::npos;
@@ -99,7 +102,7 @@ bool ADBControl::removeForward(int port) {
     }
 }
 
-bool ADBControl::init() {
+bool ADBControl::init(const std::string& preferredSerial) {
     if (!isADBExists()) {
         printf("ERROR: adb not found. Install Android Platform Tools and make sure adb is in PATH.\n");
         return false;
@@ -111,9 +114,21 @@ bool ADBControl::init() {
         return false;
     }
 
+    if (!preferredSerial.empty()) {
+        for (const auto& d : devices) {
+            if (d == preferredSerial) {
+                m_serial = preferredSerial;
+                printf("Device selected: %s\n", m_serial.c_str());
+                return true;
+            }
+        }
+        printf("WARNING: Preferred device %s not found, falling back to auto-detect\n",
+            preferredSerial.c_str());
+    }
+
     if (devices.size() > 1) {
         printf("WARNING: Multiple devices detected, using first: %s\n", devices[0].c_str());
-        printf("Use --serial to specify device if needed.\n");
+        printf("Select a specific device via Settings or --serial\n");
     }
 
     m_serial = devices[0];
@@ -121,20 +136,23 @@ bool ADBControl::init() {
     return true;
 }
 
-bool ADBControl::setupAudioSource() {
-    if (!startApp()) {
-        printf("ERROR: Failed to start AudioSource app\n");
+bool ADBControl::setupAudioSource(const std::string& androidComponent,
+                                    const std::string& androidSocket,
+                                    bool ns, bool aec, bool agc) {
+    if (!startApp(androidComponent, ns, aec, agc)) {
+        printf("ERROR: Failed to start Android app (%s)\n", androidComponent.c_str());
         return false;
     }
-    printf("AudioSource app started\n");
+    printf("Android app started (NS=%d AEC=%d AGC=%d)\n", ns, aec, agc);
 
     Sleep(1500);
 
-    if (!createForward(27183, "localabstract:audiosource")) {
+    std::string remoteSocket = "localabstract:" + androidSocket;
+    if (!createForward(27183, remoteSocket)) {
         printf("ERROR: Failed to create ADB forward\n");
         return false;
     }
-    printf("ADB forward ready: tcp:27183 -> localabstract:audiosource\n");
+    printf("ADB forward ready: tcp:27183 -> %s\n", remoteSocket.c_str());
 
     return true;
 }

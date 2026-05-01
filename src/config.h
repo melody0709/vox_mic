@@ -1,0 +1,20 @@
+#pragma once
+
+#include <string>
+
+class Config {
+public:
+    std::string serial;
+    std::string host = "127.0.0.1";
+    int port = 27183;
+    std::string androidSocket = "audiosource";
+    std::string androidComponent = "fr.dzx.audiosource/.MainActivity";
+    int androidAppPreset = 0;
+    float gain = 1.5f;
+    bool nsEnabled = true;
+    bool aecEnabled = true;
+    bool agcEnabled = true;
+
+    static Config load();
+    void save() const;
+};

@@ -4,6 +4,9 @@
 #include <comdef.h>
 #include <cstdio>
 #include <cstring>
+#include <atomic>
+
+extern std::atomic<float> g_gain;
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
@@ -12,6 +15,7 @@ WASAPIOutput::WASAPIOutput() {}
 
 WASAPIOutput::~WASAPIOutput() {
     stop();
+    if (m_hEvent) { CloseHandle(m_hEvent); m_hEvent = nullptr; }
     if (m_pWaveFormat) { CoTaskMemFree(m_pWaveFormat); m_pWaveFormat = nullptr; }
     if (m_pRenderClient) { m_pRenderClient->Release(); m_pRenderClient = nullptr; }
     if (m_pAudioClient) { m_pAudioClient->Release(); m_pAudioClient = nullptr; }
@@ -69,9 +73,20 @@ bool WASAPIOutput::initAudioClient(IMMDevice* pDevice) {
 
     REFERENCE_TIME hnsBufferDuration = 2000000; // 200ms (was 1s)
     hr = m_pAudioClient->Initialize(
-        AUDCLNT_SHAREMODE_SHARED, 0, hnsBufferDuration, 0, m_pWaveFormat, NULL);
+        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, hnsBufferDuration, 0, m_pWaveFormat, NULL);
     if (FAILED(hr)) {
         printf("Initialize failed: 0x%08lx\n", hr);
+        return false;
+    }
+
+    m_hEvent = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
+    if (!m_hEvent) {
+        printf("CreateEvent failed\n");
+        return false;
+    }
+    hr = m_pAudioClient->SetEventHandle(m_hEvent);
+    if (FAILED(hr)) {
+        printf("SetEventHandle failed: 0x%08lx\n", hr);
         return false;
     }
 
@@ -120,9 +135,24 @@ void WASAPIOutput::renderThread() {
     UINT32 outFrames = (UINT32)((uint64_t)FRAMES_PER_BLOCK * m_deviceSampleRate / SAMPLE_RATE);
     UINT32 outBytesPerFrame = m_deviceChannels * (m_deviceBits / 8);
     UINT32 outBlockSize = outFrames * outBytesPerFrame;
+    bool isFloat = (m_deviceBits == 32);
 
-    printf("Render: %d input frames -> %u output frames\n", FRAMES_PER_BLOCK, outFrames);
+    printf("Render: %d input frames -> %u output frames (event-driven)\n", FRAMES_PER_BLOCK, outFrames);
     fflush(stdout);
+
+    {
+        UINT32 framesRemaining = m_bufferFrameCount;
+        while (framesRemaining > 0) {
+            UINT32 fillFrames = (framesRemaining < outFrames) ? framesRemaining : outFrames;
+            UINT32 fillBytes = fillFrames * outBytesPerFrame;
+            BYTE* pData = nullptr;
+            HRESULT hr = m_pRenderClient->GetBuffer(fillFrames, &pData);
+            if (FAILED(hr)) break;
+            memset(pData, 0, fillBytes);
+            m_pRenderClient->ReleaseBuffer(fillFrames, 0);
+            framesRemaining -= fillFrames;
+        }
+    }
 
     HRESULT hr = m_pAudioClient->Start();
     if (FAILED(hr)) {
@@ -130,63 +160,75 @@ void WASAPIOutput::renderThread() {
         return;
     }
 
-    printf("Audio render started\n");
+    printf("Audio render started (event-driven)\n");
     fflush(stdout);
 
-    bool isFloat = (m_deviceBits == 32);
-
     while (m_running.load(std::memory_order_relaxed)) {
+        DWORD waitResult = WaitForSingleObject(m_hEvent, 2000);
+        if (waitResult != WAIT_OBJECT_0) {
+            if (!m_running.load(std::memory_order_relaxed)) break;
+            continue;
+        }
+
+        float gain = g_gain.load(std::memory_order_relaxed);
+
         UINT32 padding = 0;
         hr = m_pAudioClient->GetCurrentPadding(&padding);
         if (FAILED(hr)) break;
 
-        if (m_bufferFrameCount - padding < outFrames) {
-            Sleep(1);
-            continue;
-        }
+        UINT32 avail = m_bufferFrameCount - padding;
 
-        BYTE* pData = nullptr;
-        hr = m_pRenderClient->GetBuffer(outFrames, &pData);
-        if (FAILED(hr)) {
-            printf("GetBuffer failed: 0x%08lx\n", hr);
-            break;
-        }
+        while (avail >= outFrames && m_running.load(std::memory_order_relaxed)) {
+            BYTE* pData = nullptr;
+            hr = m_pRenderClient->GetBuffer(outFrames, &pData);
+            if (FAILED(hr)) break;
 
-        if (m_ringBuffer.pop((uint8_t*)monoBuffer, BLOCK_SIZE)) {
-            // Resample mono int16 -> device format stereo
-            if (isFloat) {
-                float* out = (float*)pData;
-                for (UINT32 i = 0; i < outFrames; i++) {
-                    double srcPos = (double)i * m_resampleRatio;
-                    UINT32 idx = (UINT32)srcPos;
-                    double frac = srcPos - idx;
-                    float s;
-                    if (idx + 1 < FRAMES_PER_BLOCK)
-                        s = (float)((1.0 - frac) * monoBuffer[idx] + frac * monoBuffer[idx + 1]) / 32768.0f;
-                    else if (idx < FRAMES_PER_BLOCK)
-                        s = (float)monoBuffer[idx] / 32768.0f;
-                    else
-                        s = 0.0f;
-                    out[i * m_deviceChannels] = s;
-                    if (m_deviceChannels > 1) out[i * m_deviceChannels + 1] = s;
+            if (m_ringBuffer.pop((uint8_t*)monoBuffer, BLOCK_SIZE)) {
+                if (isFloat) {
+                    float* out = (float*)pData;
+                    for (UINT32 i = 0; i < outFrames; i++) {
+                        double srcPos = (double)i * m_resampleRatio;
+                        UINT32 idx = (UINT32)srcPos;
+                        double frac = srcPos - idx;
+                        float s;
+                        if (idx + 1 < FRAMES_PER_BLOCK)
+                            s = (float)((1.0 - frac) * monoBuffer[idx] + frac * monoBuffer[idx + 1]) / 32768.0f;
+                        else if (idx < FRAMES_PER_BLOCK)
+                            s = (float)monoBuffer[idx] / 32768.0f;
+                        else
+                            s = 0.0f;
+                        out[i * m_deviceChannels] = s * gain;
+                        if (m_deviceChannels > 1) out[i * m_deviceChannels + 1] = s * gain;
+                    }
+                } else {
+                    int16_t* out = (int16_t*)pData;
+                    for (UINT32 i = 0; i < outFrames; i++) {
+                        double srcPos = (double)i * m_resampleRatio;
+                        UINT32 idx = (UINT32)srcPos;
+                        double frac = srcPos - idx;
+                        double s;
+                        if (idx + 1 < FRAMES_PER_BLOCK)
+                            s = (1.0 - frac) * monoBuffer[idx] + frac * monoBuffer[idx + 1];
+                        else if (idx < FRAMES_PER_BLOCK)
+                            s = (double)monoBuffer[idx];
+                        else
+                            s = 0.0;
+                        s *= gain;
+                        int16_t sample = (int16_t)(s < -32768.0 ? -32768 : (s > 32767.0 ? 32767 : s));
+                        out[i * m_deviceChannels] = sample;
+                        if (m_deviceChannels > 1) out[i * m_deviceChannels + 1] = sample;
+                    }
                 }
             } else {
-                int16_t* out = (int16_t*)pData;
-                for (UINT32 i = 0; i < outFrames; i++) {
-                    UINT32 idx = (UINT32)((double)i * m_resampleRatio);
-                    if (idx >= FRAMES_PER_BLOCK) idx = FRAMES_PER_BLOCK - 1;
-                    out[i * m_deviceChannels] = monoBuffer[idx];
-                    if (m_deviceChannels > 1) out[i * m_deviceChannels + 1] = monoBuffer[idx];
-                }
+                memset(pData, 0, outBlockSize);
+                underruns.fetch_add(1, std::memory_order_relaxed);
             }
-        } else {
-            memset(pData, 0, outBlockSize);
-            underruns.fetch_add(1, std::memory_order_relaxed);
+
+            m_pRenderClient->ReleaseBuffer(outFrames, 0);
+            avail -= outFrames;
         }
 
-        m_pRenderClient->ReleaseBuffer(outFrames, 0);
-        // Sleep for full block duration to match input rate
-        Sleep((DWORD)(outFrames * 1000 / m_deviceSampleRate));
+        if (FAILED(hr)) break;
     }
 
     m_pAudioClient->Stop();
