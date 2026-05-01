@@ -55,6 +55,34 @@ Config Config::load() {
         if (RegQueryValueExA(hKey, "AgcEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
             cfg.agcEnabled = (flagVal != 0);
         }
+
+        size = sizeof(flagVal);
+        if (RegQueryValueExA(hKey, "EqEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
+            cfg.eqEnabled = (flagVal != 0);
+        }
+        DWORD presRaw;
+        size = sizeof(presRaw);
+        if (RegQueryValueExA(hKey, "EqPresence", NULL, NULL, (LPBYTE)&presRaw, &size) == ERROR_SUCCESS) {
+            cfg.eqPresence = (float)presRaw / 10.0f;
+            if (cfg.eqPresence < 0.0f) cfg.eqPresence = 0.0f;
+            if (cfg.eqPresence > 6.0f) cfg.eqPresence = 6.0f;
+        }
+        DWORD bassRaw;
+        size = sizeof(bassRaw);
+        if (RegQueryValueExA(hKey, "EqBassCut", NULL, NULL, (LPBYTE)&bassRaw, &size) == ERROR_SUCCESS) {
+            cfg.eqBassCut = -(float)bassRaw / 10.0f;
+            if (cfg.eqBassCut < -6.0f) cfg.eqBassCut = -6.0f;
+            if (cfg.eqBassCut > 0.0f) cfg.eqBassCut = 0.0f;
+        }
+        size = sizeof(flagVal);
+        if (RegQueryValueExA(hKey, "CompressorEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
+            cfg.compressorEnabled = (flagVal != 0);
+        }
+        size = sizeof(flagVal);
+        if (RegQueryValueExA(hKey, "NrEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
+            cfg.nrEnabled = (flagVal != 0);
+        }
+
         RegCloseKey(hKey);
     }
     return cfg;
@@ -87,6 +115,18 @@ void Config::save() const {
         RegSetValueExA(hKey, "AecEnabled", 0, REG_DWORD, (const BYTE*)&aecVal, sizeof(aecVal));
         DWORD agcVal = agcEnabled ? 1 : 0;
         RegSetValueExA(hKey, "AgcEnabled", 0, REG_DWORD, (const BYTE*)&agcVal, sizeof(agcVal));
+
+        DWORD eqVal = eqEnabled ? 1 : 0;
+        RegSetValueExA(hKey, "EqEnabled", 0, REG_DWORD, (const BYTE*)&eqVal, sizeof(eqVal));
+        DWORD presRaw = (DWORD)(eqPresence * 10.0f);
+        RegSetValueExA(hKey, "EqPresence", 0, REG_DWORD, (const BYTE*)&presRaw, sizeof(presRaw));
+        DWORD bassRaw = (DWORD)(-eqBassCut * 10.0f);
+        RegSetValueExA(hKey, "EqBassCut", 0, REG_DWORD, (const BYTE*)&bassRaw, sizeof(bassRaw));
+        DWORD compVal = compressorEnabled ? 1 : 0;
+        RegSetValueExA(hKey, "CompressorEnabled", 0, REG_DWORD, (const BYTE*)&compVal, sizeof(compVal));
+        DWORD nrVal = nrEnabled ? 1 : 0;
+        RegSetValueExA(hKey, "NrEnabled", 0, REG_DWORD, (const BYTE*)&nrVal, sizeof(nrVal));
+
         RegCloseKey(hKey);
     }
 }

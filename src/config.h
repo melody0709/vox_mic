@@ -14,6 +14,11 @@ public:
     bool nsEnabled = true;
     bool aecEnabled = true;
     bool agcEnabled = true;
+    bool eqEnabled = true;
+    float eqPresence = 3.0f;
+    float eqBassCut = -3.0f;
+    bool compressorEnabled = true;
+    bool nrEnabled = true;
 
     static Config load();
     void save() const;

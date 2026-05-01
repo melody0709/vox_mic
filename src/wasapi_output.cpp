@@ -1,12 +1,11 @@
 #include "wasapi_output.h"
 #include "device_enum.h"
+#include "dsp/pipeline.h"
 #include <functiondiscoverykeys_devpkey.h>
 #include <comdef.h>
 #include <cstdio>
 #include <cstring>
 #include <atomic>
-
-extern std::atomic<float> g_gain;
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
@@ -132,10 +131,14 @@ bool WASAPIOutput::init(bool listDevicesOnly) {
 
 void WASAPIOutput::renderThread() {
     int16_t monoBuffer[FRAMES_PER_BLOCK];
+    float floatBuf[FRAMES_PER_BLOCK];
     UINT32 outFrames = (UINT32)((uint64_t)FRAMES_PER_BLOCK * m_deviceSampleRate / SAMPLE_RATE);
     UINT32 outBytesPerFrame = m_deviceChannels * (m_deviceBits / 8);
     UINT32 outBlockSize = outFrames * outBytesPerFrame;
     bool isFloat = (m_deviceBits == 32);
+
+    DspPipeline pipeline;
+    pipeline.init((float)SAMPLE_RATE);
 
     printf("Render: %d input frames -> %u output frames (event-driven)\n", FRAMES_PER_BLOCK, outFrames);
     fflush(stdout);
@@ -184,6 +187,11 @@ void WASAPIOutput::renderThread() {
             if (FAILED(hr)) break;
 
             if (m_ringBuffer.pop((uint8_t*)monoBuffer, BLOCK_SIZE)) {
+                for (int i = 0; i < FRAMES_PER_BLOCK; i++)
+                    floatBuf[i] = (float)monoBuffer[i] / 32768.0f;
+
+                pipeline.process(floatBuf, FRAMES_PER_BLOCK, (float)SAMPLE_RATE);
+
                 if (isFloat) {
                     float* out = (float*)pData;
                     for (UINT32 i = 0; i < outFrames; i++) {
@@ -192,9 +200,9 @@ void WASAPIOutput::renderThread() {
                         double frac = srcPos - idx;
                         float s;
                         if (idx + 1 < FRAMES_PER_BLOCK)
-                            s = (float)((1.0 - frac) * monoBuffer[idx] + frac * monoBuffer[idx + 1]) / 32768.0f;
+                            s = (float)((1.0 - frac) * floatBuf[idx] + frac * floatBuf[idx + 1]);
                         else if (idx < FRAMES_PER_BLOCK)
-                            s = (float)monoBuffer[idx] / 32768.0f;
+                            s = floatBuf[idx];
                         else
                             s = 0.0f;
                         out[i * m_deviceChannels] = s * gain;
@@ -208,13 +216,14 @@ void WASAPIOutput::renderThread() {
                         double frac = srcPos - idx;
                         double s;
                         if (idx + 1 < FRAMES_PER_BLOCK)
-                            s = (1.0 - frac) * monoBuffer[idx] + frac * monoBuffer[idx + 1];
+                            s = (1.0 - frac) * floatBuf[idx] + frac * floatBuf[idx + 1];
                         else if (idx < FRAMES_PER_BLOCK)
-                            s = (double)monoBuffer[idx];
+                            s = (double)floatBuf[idx];
                         else
                             s = 0.0;
-                        s *= gain;
-                        int16_t sample = (int16_t)(s < -32768.0 ? -32768 : (s > 32767.0 ? 32767 : s));
+                        s *= gain * 32767.0;
+                        s = (s < -32768.0) ? -32768.0 : (s > 32767.0) ? 32767.0 : s;
+                        int16_t sample = (int16_t)s;
                         out[i * m_deviceChannels] = sample;
                         if (m_deviceChannels > 1) out[i * m_deviceChannels + 1] = sample;
                     }

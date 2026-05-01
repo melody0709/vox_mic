@@ -37,6 +37,7 @@ echo Compiling...
 cl /O2 /EHsc /std:c++17 ^
     /Fo:build\ ^
     /W4 /WX- ^
+    /I src\dsp\rnnoise ^
     src\main.cpp ^
     src\wasapi_output.cpp ^
     src\device_enum.cpp ^
@@ -45,6 +46,16 @@ cl /O2 /EHsc /std:c++17 ^
     src\tray_icon.cpp ^
     src\config.cpp ^
     src\settings_dialog.cpp ^
+    src\dsp\rnnoise\celt_lpc.c ^
+    src\dsp\rnnoise\denoise.c ^
+    src\dsp\rnnoise\kiss_fft.c ^
+    src\dsp\rnnoise\nnet.c ^
+    src\dsp\rnnoise\nnet_default.c ^
+    src\dsp\rnnoise\parse_lpcnet_weights.c ^
+    src\dsp\rnnoise\pitch.c ^
+    src\dsp\rnnoise\rnn.c ^
+    src\dsp\rnnoise\rnnoise_tables.c ^
+    src\dsp\rnnoise\rnnoise_data.c ^
     /Fe:build\audiosource.exe ^
     /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib
 

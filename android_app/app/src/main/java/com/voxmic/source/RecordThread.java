@@ -33,8 +33,8 @@ public class RecordThread extends Thread {
             Log.e(App.TAG, "LocalServerSocket (bind)", e);
         }
 
-        // Align: 512 frames = 1024 bytes = 10.7ms at 48000Hz
-        final int BLOCK_SIZE = 1024;
+        // Align: 480 frames = 960 bytes = 10.0ms at 48000Hz
+        final int BLOCK_SIZE = 960;
         byte[] buf = new byte[BLOCK_SIZE];
 
         while (!Thread.currentThread().isInterrupted()) {

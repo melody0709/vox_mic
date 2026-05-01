@@ -19,11 +19,22 @@
 #define IDC_CHECK_NS          2010
 #define IDC_CHECK_AEC         2011
 #define IDC_CHECK_AGC         2012
+#define IDC_CHECK_EQ          2013
+#define IDC_TRACKBAR_PRES     2014
+#define IDC_LABEL_PRES        2015
+#define IDC_TRACKBAR_BASS     2016
+#define IDC_LABEL_BASS        2017
+#define IDC_CHECK_COMP        2018
+#define IDC_CHECK_NR          2019
+
+struct SettingsInit {
+    Config* pConfig;
+    bool*   pOk;
+};
 
 struct SettingsDialogData {
     Config* pConfig;
-    bool    result;
-    bool    classRegistered;
+    bool*   pOk;
 };
 
 static void refreshDeviceList(HWND hCombo, const std::string& currentSerial) {
@@ -59,16 +70,32 @@ static void refreshDeviceList(HWND hCombo, const std::string& currentSerial) {
     SendMessageA(hCombo, CB_SETCURSEL, (WPARAM)selIdx, 0);
 }
 
+static void updatePresLabel(HWND hWnd) {
+    int pos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
+    float val = (float)pos / 10.0f;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "+%.1f dB", val);
+    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_PRES), buf);
+}
+
+static void updateBassLabel(HWND hWnd) {
+    int pos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
+    float val = -(float)pos / 10.0f;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.1f dB", val);
+    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_BASS), buf);
+}
+
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
 
     switch (msg) {
     case WM_CREATE: {
         CREATESTRUCTA* pCreate = (CREATESTRUCTA*)lParam;
+        SettingsInit* pInit = (SettingsInit*)pCreate->lpCreateParams;
         pData = new SettingsDialogData();
-        pData->pConfig = (Config*)pCreate->lpCreateParams;
-        pData->result = false;
-        pData->classRegistered = false;
+        pData->pConfig = pInit->pConfig;
+        pData->pOk = pInit->pOk;
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
 
         HINSTANCE hInst = pCreate->hInstance;
@@ -121,7 +148,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
             ctrlX, yBase, 250, 200, hWnd, (HMENU)IDC_COMBO_ANDROID_APP, hInst, NULL);
 
-        SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"Original AudioSource (gdzx) - DEFAULT source / no effects");
+        SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"Original AudioSource (gdzx) - DEFAULT / no effects");
         SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"VoxMic Source (improved) - 48000Hz / DEFAULT + NS + AEC");
 
         int appSel = pData->pConfig->androidAppPreset;
@@ -174,7 +201,81 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_SETCHECK,
             pData->pConfig->agcEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 
-        yBase += 44;
+        yBase += 38;
+
+        CreateWindowExA(0, "STATIC", "DSP Audio Enhance:",
+            WS_CHILD | WS_VISIBLE,
+            xMargin, yBase, lblW + 100, 22, hWnd, NULL, hInst, NULL);
+
+        yBase += 26;
+
+        CreateWindowExA(0, "BUTTON", "EQ Enable",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            ctrlX, yBase, 100, 22, hWnd, (HMENU)IDC_CHECK_EQ, hInst, NULL);
+        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_SETCHECK,
+            pData->pConfig->eqEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+        yBase += 30;
+
+        CreateWindowExA(0, "STATIC", "Presence:",
+            WS_CHILD | WS_VISIBLE,
+            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL);
+
+        CreateWindowExA(0, "STATIC", "",
+            WS_CHILD | WS_VISIBLE,
+            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_PRES, hInst, NULL);
+
+        HWND hPresTrackbar = CreateWindowExA(0, TRACKBAR_CLASSA, "",
+            WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_TOOLTIPS,
+            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_PRES, hInst, NULL);
+        SendMessageA(hPresTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
+        SendMessageA(hPresTrackbar, TBM_SETTICFREQ, 10, 0);
+        int presPos = (int)(pData->pConfig->eqPresence * 10.0f);
+        if (presPos < 0) presPos = 0;
+        if (presPos > 60) presPos = 60;
+        SendMessageA(hPresTrackbar, TBM_SETPOS, TRUE, presPos);
+
+        updatePresLabel(hWnd);
+
+        yBase += 30;
+
+        CreateWindowExA(0, "STATIC", "Bass Cut:",
+            WS_CHILD | WS_VISIBLE,
+            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL);
+
+        CreateWindowExA(0, "STATIC", "",
+            WS_CHILD | WS_VISIBLE,
+            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_BASS, hInst, NULL);
+
+        HWND hBassTrackbar = CreateWindowExA(0, TRACKBAR_CLASSA, "",
+            WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_TOOLTIPS,
+            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_BASS, hInst, NULL);
+        SendMessageA(hBassTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
+        SendMessageA(hBassTrackbar, TBM_SETTICFREQ, 10, 0);
+        int bassPos = (int)(-pData->pConfig->eqBassCut * 10.0f);
+        if (bassPos < 0) bassPos = 0;
+        if (bassPos > 60) bassPos = 60;
+        SendMessageA(hBassTrackbar, TBM_SETPOS, TRUE, bassPos);
+
+        updateBassLabel(hWnd);
+
+        yBase += 30;
+
+        CreateWindowExA(0, "BUTTON", "Compressor Enable",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            ctrlX, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_COMP, hInst, NULL);
+        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_SETCHECK,
+            pData->pConfig->compressorEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+        yBase += 30;
+
+        CreateWindowExA(0, "BUTTON", "Noise Reduction",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            ctrlX, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL);
+        SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
+            pData->pConfig->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+        yBase += 40;
 
         CreateWindowExA(0, "BUTTON", "OK",
             WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
@@ -197,6 +298,10 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             char buf[32];
             snprintf(buf, sizeof(buf), "%.2fx", g);
             SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_GAIN), buf);
+        } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_PRES)) {
+            updatePresLabel(hWnd);
+        } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_BASS)) {
+            updateBassLabel(hWnd);
         }
         return 0;
     }
@@ -247,13 +352,27 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             pData->pConfig->agcEnabled =
                 (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_GETCHECK, 0, 0) == BST_CHECKED);
 
+            pData->pConfig->eqEnabled =
+                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_GETCHECK, 0, 0) == BST_CHECKED);
+            int presPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
+            pData->pConfig->eqPresence = (float)presPos / 10.0f;
+            if (pData->pConfig->eqPresence < 0.0f) pData->pConfig->eqPresence = 0.0f;
+            if (pData->pConfig->eqPresence > 6.0f) pData->pConfig->eqPresence = 6.0f;
+            int bassPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
+            pData->pConfig->eqBassCut = -(float)bassPos / 10.0f;
+            if (pData->pConfig->eqBassCut < -6.0f) pData->pConfig->eqBassCut = -6.0f;
+            if (pData->pConfig->eqBassCut > 0.0f) pData->pConfig->eqBassCut = 0.0f;
+            pData->pConfig->compressorEnabled =
+                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_GETCHECK, 0, 0) == BST_CHECKED);
+            pData->pConfig->nrEnabled =
+                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_GETCHECK, 0, 0) == BST_CHECKED);
+
             pData->pConfig->save();
-            pData->result = true;
+            *(pData->pOk) = true;
             DestroyWindow(hWnd);
             break;
         }
         case IDC_BTN_CANCEL:
-            pData->result = false;
             DestroyWindow(hWnd);
             break;
         }
@@ -294,14 +413,17 @@ bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
     }
 
     Config tempConfig = config;
+    bool ok = false;
+
+    SettingsInit init = { &tempConfig, &ok };
 
     HWND hWnd = CreateWindowExA(
         WS_EX_DLGMODALFRAME,
         SETTINGS_CLASS,
         "AudioSource Win - Settings",
         WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0, 0, 780, 630,
-        hParent, NULL, hInstance, &tempConfig);
+        0, 0, 500, 520,
+        hParent, NULL, hInstance, &init);
 
     if (!hWnd) return false;
 
@@ -333,9 +455,7 @@ bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
     EnableWindow(hParent, TRUE);
     SetForegroundWindow(hParent);
 
-    if (tempConfig.serial != config.serial ||
-        tempConfig.host != config.host ||
-        tempConfig.port != config.port) {
+    if (ok) {
         config = tempConfig;
         return true;
     }

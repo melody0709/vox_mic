@@ -22,9 +22,23 @@ static std::atomic<bool> g_running{true};
 static std::atomic<bool> g_bridgeActive{true};
 static std::atomic<bool> g_streaming{false};
 std::atomic<float> g_gain{1.5f};
+std::atomic<bool> g_eqEnabled{true};
+std::atomic<float> g_eqPresence{3.0f};
+std::atomic<float> g_eqBassCut{-3.0f};
+std::atomic<bool> g_compressorEnabled{true};
+std::atomic<bool> g_nrEnabled{true};
 static WASAPIOutput* g_wasapiOutput{nullptr};
 static TrayIcon* g_trayIcon{nullptr};
 static HINSTANCE g_hInstance{nullptr};
+
+static void syncDspAtomsFromConfig() {
+    g_gain.store(g_config.gain, std::memory_order_relaxed);
+    g_eqEnabled.store(g_config.eqEnabled, std::memory_order_relaxed);
+    g_eqPresence.store(g_config.eqPresence, std::memory_order_relaxed);
+    g_eqBassCut.store(g_config.eqBassCut, std::memory_order_relaxed);
+    g_compressorEnabled.store(g_config.compressorEnabled, std::memory_order_relaxed);
+    g_nrEnabled.store(g_config.nrEnabled, std::memory_order_relaxed);
+}
 
 VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
@@ -60,7 +74,7 @@ void audioBridgeThread() {
         bool ns = g_config.nsEnabled;
         bool aec = g_config.aecEnabled;
         bool agc = g_config.agcEnabled;
-        g_gain.store(g_config.gain, std::memory_order_relaxed);
+        syncDspAtomsFromConfig();
 
         if (!adb.init(serial)) {
             Sleep(2000);
@@ -152,7 +166,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             Config newConfig = g_config;
             if (showSettingsDialog(g_hInstance, hWnd, newConfig)) {
                 g_config = newConfig;
-                // Bridge thread reads g_config on next reconnect cycle
+                syncDspAtomsFromConfig();
                 printf("Settings saved, will take effect on next reconnect\n");
                 fflush(stdout);
             }
@@ -181,7 +195,7 @@ int main(int argc, char* argv[]) {
     fflush(stdout);
 
     g_config = Config::load();
-    g_gain.store(g_config.gain, std::memory_order_relaxed);
+    syncDspAtomsFromConfig();
 
     bool listDevices = false;
     std::string host = g_config.host;

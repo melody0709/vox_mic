@@ -1,6 +1,7 @@
 #pragma once
 
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #include <audioclient.h>
 #include <mmdeviceapi.h>
@@ -10,7 +11,7 @@
 
 #define SAMPLE_RATE 48000
 #define INPUT_CHANNELS 1
-#define FRAMES_PER_BLOCK 512
+#define FRAMES_PER_BLOCK 480
 #define BYTES_PER_SAMPLE 2
 #define BLOCK_SIZE (FRAMES_PER_BLOCK * INPUT_CHANNELS * BYTES_PER_SAMPLE)
 #define RING_BUFFER_BLOCKS 128
