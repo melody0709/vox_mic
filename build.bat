@@ -33,6 +33,9 @@ if defined VS_PATH (
 
 if not exist "build" mkdir build
 
+echo Compiling resources...
+rc /fo build\voxmic.res src\voxmic.rc
+
 echo Compiling...
 cl /O2 /EHsc /std:c++17 ^
     /Fo:build\ ^
@@ -57,8 +60,9 @@ cl /O2 /EHsc /std:c++17 ^
     src\dsp\rnnoise\rnn.c ^
     src\dsp\rnnoise\rnnoise_tables.c ^
     src\dsp\rnnoise\rnnoise_data.c ^
+    build\voxmic.res ^
     /Fe:build\audiosource.exe ^
-    /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib
+    /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
 if %ERRORLEVEL% EQU 0 (
     echo.

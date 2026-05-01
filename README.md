@@ -1,4 +1,4 @@
-# AudioSource Win (Raw WASAPI) v0.4.0
+# AudioSource Win (Raw WASAPI) v0.4.1
 
 将 Android 手机麦克风用作 Windows 系统麦克风，通过 ADB + VB-CABLE + Raw WASAPI 实现。支持按需激活：有 Windows 应用使用 CABLE Output 时才推流，空闲时不走 DSP。
 
@@ -11,10 +11,13 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
                                     [DSP] RNNoise → HPF → EQ → Comp → Limiter
 ```
 
-## v0.4.0 核心特性
+## v0.4.1 核心特性
 
 | 特性 | 说明 |
 |------|------|
+| **隐藏到托盘 GUI** | 无 CMD 窗口，左键托盘图标弹出设置窗口，关闭窗口即隐藏到托盘 |
+| **ADB 无闪烁** | CreateProcess + CREATE_NO_WINDOW 替换 _popen，后台调用完全不闪 |
+| **Debug Console 按需** | 勾选才弹出控制台日志，默认隐藏，零干扰 |
 | **按需激活** | IAudioSessionManager2 检测 CABLE Output 捕获状态，有应用用才推流 |
 | **Always Hot** | socket 永不主动断连，空闲时丢弃数据，激活延迟 ~12ms |
 | **RNNoise 神经网络降噪** | 官方 xiph/rnnoise v0.2，3 层 GRU，22 Bark 频段独立降噪，BSD-3 |
@@ -32,11 +35,16 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
 
 ## 使用
 
+直接启动，程序自动隐藏到系统托盘：
+
 ```cmd
-build\audiosource.exe --serial <serial>
+build\audiosource.exe
 ```
 
-在 Windows 应用中选择 **CABLE Output** 作为麦克风。
+- **左键托盘图标** → 弹出设置窗口
+- **右键托盘图标** → Start/Stop/Settings/Exit 菜单
+- **关闭窗口 [X]** → 隐藏到托盘（不退出）
+- 在 Windows 应用中选择 **CABLE Output** 作为麦克风。
 
 ## 构建
 
@@ -58,7 +66,7 @@ adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## 性能
 
-| 指标 | v0.4.0 |
+| 指标 | v0.4.1 |
 |------|--------|
 | CPU 空闲 | **~0.25%** |
 | CPU 激活 | ~2% |

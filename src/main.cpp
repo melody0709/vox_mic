@@ -16,11 +16,10 @@
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 27183
 #define STATS_INTERVAL_MS 5000
-#define WINDOW_CLASS "AudioSourceWinClass"
 
 static Config g_config;
-static std::atomic<bool> g_running{true};
-static std::atomic<bool> g_bridgeActive{true};
+std::atomic<bool> g_running{true};
+std::atomic<bool> g_bridgeActive{true};
 static std::atomic<bool> g_streaming{false};
 std::atomic<float> g_gain{1.5f};
 std::atomic<bool> g_eqEnabled{true};
@@ -34,16 +33,30 @@ static std::atomic<uint64_t> g_micOnTick{0};
 static MicUsageMonitor g_micMonitor;
 static std::thread g_monitorThread;
 static WASAPIOutput* g_wasapiOutput{nullptr};
-static TrayIcon* g_trayIcon{nullptr};
+TrayIcon* g_trayIcon{nullptr};
 static HINSTANCE g_hInstance{nullptr};
 
-static void syncDspAtomsFromConfig() {
+void syncDspAtomsFromConfig() {
     g_gain.store(g_config.gain, std::memory_order_relaxed);
     g_eqEnabled.store(g_config.eqEnabled, std::memory_order_relaxed);
     g_eqPresence.store(g_config.eqPresence, std::memory_order_relaxed);
     g_eqBassCut.store(g_config.eqBassCut, std::memory_order_relaxed);
     g_compressorEnabled.store(g_config.compressorEnabled, std::memory_order_relaxed);
     g_nrEnabled.store(g_config.nrEnabled, std::memory_order_relaxed);
+}
+
+static void setConsoleVisible(bool visible) {
+    if (visible) {
+        if (!GetConsoleWindow()) {
+            AllocConsole();
+            freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
+            freopen_s((FILE**)stderr, "CONOUT$", "w", stderr);
+        }
+    } else {
+        if (GetConsoleWindow()) {
+            FreeConsole();
+        }
+    }
 }
 
 VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
@@ -225,69 +238,12 @@ void audioBridgeThread() {
     adb.cleanup();
 }
 
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    switch (uMsg) {
-    case WM_TRAYICON:
-        if (lParam == WM_RBUTTONUP || lParam == WM_CONTEXTMENU) {
-            if (g_trayIcon) g_trayIcon->showMenu(hWnd);
-        }
-        return 0;
-
-    case WM_COMMAND:
-        switch (LOWORD(wParam)) {
-        case ID_MENU_START:
-            g_bridgeActive.store(true);
-            printf("Bridge started\n");
-            fflush(stdout);
-            break;
-
-        case ID_MENU_STOP:
-            g_bridgeActive.store(false);
-            printf("Bridge stopped\n");
-            fflush(stdout);
-            break;
-
-        case ID_MENU_SETTINGS: {
-            Config newConfig = g_config;
-            if (showSettingsDialog(g_hInstance, hWnd, newConfig)) {
-                g_config = newConfig;
-                syncDspAtomsFromConfig();
-                ShowWindow(GetConsoleWindow(), g_config.debugConsole ? SW_SHOW : SW_HIDE);
-                printf("Settings saved, will take effect on next reconnect\n");
-                fflush(stdout);
-            }
-            break;
-        }
-
-        case ID_MENU_EXIT:
-            if (g_trayIcon) g_trayIcon->destroy();
-            g_running.store(false);
-            PostQuitMessage(0);
-            break;
-        }
-        return 0;
-
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    }
-
-    return DefWindowProc(hWnd, uMsg, wParam, lParam);
-}
-
 int main(int argc, char* argv[]) {
-    printf("AudioSource Win (Raw WASAPI) - Android microphone to Windows\n");
-    printf("=============================================================\n\n");
-    fflush(stdout);
-
     g_config = Config::load();
     syncDspAtomsFromConfig();
 
-    if (!g_config.debugConsole) {
-        ShowWindow(GetConsoleWindow(), SW_HIDE);
-    }
-
     bool listDevices = false;
+    bool showHelp = false;
     std::string host = g_config.host;
     int port = g_config.port;
     std::string serial = g_config.serial;
@@ -303,16 +259,28 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--serial" && i + 1 < argc) {
             serial = argv[++i];
         } else if (arg == "--help") {
-            printf("Usage: %s [options]\n", argv[0]);
-            printf("Options:\n");
-            printf("  --list-devices    List audio devices and exit\n");
-            printf("  --host <host>     Socket host (default: %s)\n", DEFAULT_HOST);
-            printf("  --port <port>     Socket port (default: %d)\n", DEFAULT_PORT);
-            printf("  --serial <serial> ADB device serial\n");
-            printf("  --help            Show this help\n");
-            return 0;
+            showHelp = true;
         }
     }
+
+    if (showHelp || listDevices || g_config.debugConsole) {
+        setConsoleVisible(true);
+    }
+
+    if (showHelp) {
+        printf("Usage: %s [options]\n", argv[0]);
+        printf("Options:\n");
+        printf("  --list-devices    List audio devices and exit\n");
+        printf("  --host <host>     Socket host (default: %s)\n", DEFAULT_HOST);
+        printf("  --port <port>     Socket port (default: %d)\n", DEFAULT_PORT);
+        printf("  --serial <serial> ADB device serial\n");
+        printf("  --help            Show this help\n");
+        return 0;
+    }
+
+    printf("AudioSource Win (Raw WASAPI) - Android microphone to Windows\n");
+    printf("=============================================================\n\n");
+    fflush(stdout);
 
     if (!serial.empty()) {
         printf("Using device: %s\n", serial.c_str());
@@ -329,20 +297,16 @@ int main(int argc, char* argv[]) {
 
     HINSTANCE hInstance = GetModuleHandle(NULL);
     g_hInstance = hInstance;
-    WNDCLASSA wc{};
-    wc.lpfnWndProc = WindowProc;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = WINDOW_CLASS;
-    RegisterClassA(&wc);
 
-    HWND hWnd = CreateWindowExA(0, WINDOW_CLASS, "AudioSource Win",
-        0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInstance, NULL);
+    HWND hWnd = createSettingsWindow(hInstance, &g_config);
+    if (!hWnd) {
+        printf("ERROR: Failed to create settings window\n");
+        return 1;
+    }
 
     TrayIcon trayIcon;
     g_trayIcon = &trayIcon;
-    if (hWnd) {
-        trayIcon.create(hInstance, hWnd);
-    }
+    trayIcon.create(hInstance, hWnd);
 
     SetTimer(hWnd, 1, STATS_INTERVAL_MS, statsTimerProc);
 

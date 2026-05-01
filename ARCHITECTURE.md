@@ -1,4 +1,4 @@
-# 架构说明 — v0.4.0
+# 架构说明 — v0.4.1
 
 ## 数据流
 
@@ -41,15 +41,15 @@ audiosource.exe
 
 | 文件 | 职责 |
 |------|------|
-| `main.cpp` | 入口、托盘窗口、bridge 线程 (Always Hot)、monitor 线程、stats 定时器、DSP 原子变量 sync |
+| `main.cpp` | 入口、主窗口创建 (非模态)、bridge 线程 (Always Hot)、monitor 线程、stats 定时器、DSP 原子变量 sync |
 | `wasapi_output.h/cpp` | WASAPI 事件驱动初始化、渲染循环、Gain + DSP 管线注入、QPC 计时 |
 | `device_enum.h/cpp` | WASAPI 设备枚举，VB-CABLE 查找 |
 | `ring_buffer.h` | 无锁 SPSC 环形缓冲区 |
 | `socket_client.h/cpp` | Winsock2 TCP 客户端 (含 waitForData) |
-| `adb_control.h/cpp` | ADB 命令、设备检测、App 启动、端口转发 |
-| `tray_icon.h/cpp` | 系统托盘 + 右键菜单 |
-| `config.h/cpp` | 注册表持久化 (**17 字段**) |
-| `settings_dialog.h/cpp` | Win32 设置对话框 (设备/网络/App/音效/**DSP**) |
+| `adb_control.h/cpp` | ADB 命令、设备检测、App 启动、端口转发 (**CreateProcess + CREATE_NO_WINDOW**，无闪烁) |
+| `tray_icon.h/cpp` | 系统托盘 + 右键菜单 (含灰度版本号) |
+| `config.h/cpp` | 注册表持久化 (**18 字段**) |
+| `settings_dialog.h/cpp` | **主窗口** GUI (设备/网络/App/音效/DSP/Debug，非模态持久窗口) |
 | **`mic_usage_monitor.h/cpp`** | Phase 3: IAudioSessionManager2 轮询检测 CABLE Output 捕获状态 |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
 | **`dsp/pipeline.h`** | DSP 链调度 (RNNoise→HPF→EQ→Comp→Limiter) |
@@ -108,7 +108,7 @@ audiosource.exe
 ```
 main thread:         消息泵 + SetTimer(stats, 5s)
 monitor thread:      100ms 轮询 IAudioSessionManager2 → g_micRequested (Phase 3)
-bridge thread:       ADB 一次性初始化 + Socket Always Hot → g_micRequested 门控 → ring buffer push/discard
+bridge thread:       ADB 一次性初始化 (CreateProcess NO_WINDOW) + Socket Always Hot → g_micRequested 门控 → ring buffer push/discard
 render thread:       事件驱动 ring buffer pop → int16→float → DspPipeline (47µs/块) → WASAPI write
 ```
 

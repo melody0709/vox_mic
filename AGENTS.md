@@ -1,4 +1,4 @@
-# AGENTS.md — v0.4.0
+# AGENTS.md — v0.4.1
 
 ## 项目概述
 
@@ -51,13 +51,22 @@ adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## 运行
 
+直接启动（无控制台窗口，后台运行于托盘）：
+
 ```cmd
-build\audiosource.exe --serial <serial>
+build\audiosource.exe
 ```
+
+| 操作 | 效果 |
+|------|------|
+| 直接运行 | 程序启动，隐藏到系统托盘 |
+| 左键托盘图标 | 弹出设置窗口 |
+| 关闭设置窗口 [X] | 隐藏到托盘（不退出） |
+| 右键托盘菜单 → Exit | 彻底退出 |
 
 在 Windows 应用中选择 **CABLE Output** 作为麦克风。
 
-## v0.4.0 关键参数
+## v0.4.1 关键参数
 
 ### 传输参数
 
@@ -93,7 +102,7 @@ build\audiosource.exe --serial <serial>
 | Compressor | -18dBFS, 3:1, 5/50ms | `g_compressorEnabled` | `dsp/pipeline.h` |
 | Limiter | -1dBFS | 始终 | `dsp/pipeline.h` |
 
-### 配置字段 (17)
+### 配置字段 (18)
 
 | 分类 | 字段 | 类型 | 默认 |
 |------|------|------|------|
@@ -103,6 +112,7 @@ build\audiosource.exe --serial <serial>
 | 音效 | nsEnabled / aecEnabled / agcEnabled | bool | true/true/true |
 | DSP | eqEnabled / compressorEnabled / nrEnabled | bool | true/true/true |
 | DSP | eqPresence / eqBassCut | float (0~6 / -6~0) | 3.0 / -3.0 |
+| 界面 | debugConsole | bool | true |
 
 ### 全局原子变量
 
@@ -129,10 +139,10 @@ src/
 ├── device_enum.h/cpp
 ├── ring_buffer.h
 ├── socket_client.h/cpp
-├── adb_control.h/cpp
-├── tray_icon.h/cpp
-├── config.h/cpp
-├── settings_dialog.h/cpp
+├── adb_control.h/cpp          # ADB 命令 (CreateProcess + CREATE_NO_WINDOW, 无闪烁)
+├── tray_icon.h/cpp            # 系统托盘 + 右键菜单 (含版本号)
+├── config.h/cpp               # 注册表持久化 (18 字段)
+├── settings_dialog.h/cpp       # 主窗口 UI (非模态, 关闭即隐藏到托盘)
 ├── mic_usage_monitor.h/cpp   # Phase 3: IAudioSessionManager2 按需检测
 └── dsp/
     ├── biquad.h              # BiQuad IIR 滤波器
@@ -171,6 +181,15 @@ render thread:       ring buffer pop → int16→float → DspPipeline → WASAP
 - **检测延迟实测 ~12ms** (monitor ON → bridge 首块 push)
 - **端到端延迟 ~40ms** (实测, 比 v0.3.0 的 ~85ms 减半)
 - **空闲 CPU ~0.25%** (DSP 全跳, monitor 0.15%, WASAPI 静音 0.1%)
+
+## Phase 5 — 隐藏到托盘 GUI (已完成 v0.4.1)
+
+- **非模态主窗口**: `settings_dialog.cpp` 改造为 `createSettingsWindow()`，不再使用模态消息循环
+- **隐藏到托盘**: `WM_CLOSE` → `ShowWindow(SW_HIDE)`，`WM_TRAYICON + WM_LBUTTONUP` → `ShowWindow(SW_SHOW)`
+- **无 CMD 窗口**: `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`，Debug Console `AllocConsole()` 按需分配
+- **ADB 无闪烁**: `_popen` → `CreateProcess(NULL, …, CREATE_NO_WINDOW, …)`，`runCommandNoWindow()` 公开共用
+- **设置即主窗口**: 右键菜单 "Settings" 显示设置窗口，OK 保存隐藏，Cancel 恢复隐藏
+- **版本号**: 托盘右键菜单底部灰色 `v0.4.1`
 
 ## Next: DeepFilterNet3 (Phase 6C)
 

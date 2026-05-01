@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.4.1 (2026-05-02)
+
+### Phase 5: 隐藏到托盘 GUI + ADB 无闪烁
+
+| 特性 | 说明 |
+|------|------|
+| **隐藏到托盘** | 设置窗口提升为主窗口，程序启动即隐藏到托盘，右键 Exit 才退出 |
+| **托盘交互** | 左键托盘图标弹出设置窗口，关闭窗口即隐藏（不退出） |
+| **ADB 无闪烁** | `CreateProcess` + `CREATE_NO_WINDOW` 替换所有 `_popen("adb ...")`，后台调用零黑窗 |
+| **/SUBSYSTEM:WINDOWS** | 无控制台子系统启动，无任何窗口闪烁 |
+| **Debug Console 按需** | 勾选才 `AllocConsole()`，默认隐藏，复选框持久化到注册表 |
+| **启动信息日志** | 启动时打印 Gain/DSP/Android HW 设置摘要 |
+| **版本号** | 托盘右键菜单底部显示灰色 `v0.4.1` |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `build.bat` | 链接器 + `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` |
+| `src/adb_control.h/cpp` | `runCommand` → 公开 `runCommandNoWindow()` (CreateProcess + CREATE_NO_WINDOW) |
+| `src/settings_dialog.h/cpp` | 模态 `showSettingsDialog` → 非模态持久窗口 `createSettingsWindow` + `loadSettingsWindow` |
+| `src/main.cpp` | 删除 `WindowProc`/`HWND_MESSAGE`，改为 `createSettingsWindow`，`setConsoleVisible()` 用 FreeConsole/AllocConsole |
+| `src/tray_icon.cpp` | "Settings..." → "Settings"，新增灰色版本号菜单项 |
+| `src/config.h/cpp` | 新增 `debugConsole` 字段 (18 字段) |
+
+#### 构建变更
+
+```
+# v0.4.0
+/link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib
+
+# v0.4.1
+/link ... /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+```
+
+---
+
 ## v0.4.0 (2026-05-01)
 
 ### Phase 3: 麦克风按需激活 + 延迟压缩

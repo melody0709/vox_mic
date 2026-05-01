@@ -2,56 +2,71 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <cstdio>
-#include <memory>
 #include <stdexcept>
-#include <array>
 #include <sstream>
 
-std::string ADBControl::runCommand(const std::string& cmd) const {
-    std::array<char, 256> buffer;
+std::string runCommandNoWindow(const std::string& cmdLine) {
+    HANDLE hRead, hWrite;
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0)) return "";
+
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si = { sizeof(si) };
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = hWrite;
+    si.hStdError = hWrite;
+
+    PROCESS_INFORMATION pi = {};
+    char* cmd = _strdup(cmdLine.c_str());
+
+    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE,
+                             CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    free(cmd);
+    CloseHandle(hWrite);
+
+    if (!ok) {
+        CloseHandle(hRead);
+        return "";
+    }
+
     std::string result;
-    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd.c_str(), "r"), _pclose);
-    if (!pipe) {
-        throw std::runtime_error("popen() failed!");
+    char buf[512];
+    DWORD bytesRead;
+    while (ReadFile(hRead, buf, sizeof(buf) - 1, &bytesRead, NULL) && bytesRead > 0) {
+        buf[bytesRead] = '\0';
+        result += buf;
     }
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
-    }
+    CloseHandle(hRead);
+    WaitForSingleObject(pi.hProcess, 5000);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
     return result;
 }
 
 bool ADBControl::isADBExists() const {
-    try {
-        std::string result = runCommand("adb version");
-        return result.find("Android Debug Bridge") != std::string::npos;
-    } catch (...) {
-        return false;
-    }
+    std::string result = runCommandNoWindow("adb version");
+    return result.find("Android Debug Bridge") != std::string::npos;
 }
 
 std::vector<std::string> ADBControl::getDevices() const {
     std::vector<std::string> devices;
-    try {
-        std::string result = runCommand("adb devices");
-        std::istringstream stream(result);
-        std::string line;
-        bool first = true;
-        while (std::getline(stream, line)) {
-            if (first) {
-                first = false;
-                continue;
-            }
-            if (line.empty()) continue;
-            size_t tabPos = line.find('\t');
-            if (tabPos != std::string::npos) {
-                std::string serial = line.substr(0, tabPos);
-                std::string status = line.substr(tabPos + 1);
-                if (status.find("device") != std::string::npos) {
-                    devices.push_back(serial);
-                }
+    std::string result = runCommandNoWindow("adb devices");
+    std::istringstream stream(result);
+    std::string line;
+    bool first = true;
+    while (std::getline(stream, line)) {
+        if (first) { first = false; continue; }
+        if (line.empty()) continue;
+        size_t tabPos = line.find('\t');
+        if (tabPos != std::string::npos) {
+            std::string serial = line.substr(0, tabPos);
+            std::string status = line.substr(tabPos + 1);
+            if (status.find("device") != std::string::npos) {
+                devices.push_back(serial);
             }
         }
-    } catch (...) {}
+    }
     return devices;
 }
 
@@ -64,12 +79,8 @@ bool ADBControl::startApp(const std::string& component, bool ns, bool aec, bool 
         + " --ez ns_enabled " + (ns ? "true" : "false")
         + " --ez aec_enabled " + (aec ? "true" : "false")
         + " --ez agc_enabled " + (agc ? "true" : "false");
-    try {
-        std::string result = runCommand(cmd);
-        return result.find("Error") == std::string::npos;
-    } catch (...) {
-        return false;
-    }
+    std::string result = runCommandNoWindow(cmd);
+    return result.find("Error") == std::string::npos;
 }
 
 bool ADBControl::createForward(int port, const std::string& remoteSocket) {
@@ -80,12 +91,8 @@ bool ADBControl::createForward(int port, const std::string& remoteSocket) {
         cmd += " -s " + m_serial;
     }
     cmd += " forward tcp:" + std::to_string(port) + " " + remoteSocket;
-    try {
-        runCommand(cmd);
-        return true;
-    } catch (...) {
-        return false;
-    }
+    runCommandNoWindow(cmd);
+    return true;
 }
 
 bool ADBControl::removeForward(int port) {
@@ -94,12 +101,8 @@ bool ADBControl::removeForward(int port) {
         cmd += " -s " + m_serial;
     }
     cmd += " forward --remove tcp:" + std::to_string(port);
-    try {
-        runCommand(cmd);
-        return true;
-    } catch (...) {
-        return false;
-    }
+    runCommandNoWindow(cmd);
+    return true;
 }
 
 bool ADBControl::init(const std::string& preferredSerial) {

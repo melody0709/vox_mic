@@ -4,4 +4,5 @@
 #include <windows.h>
 #include "config.h"
 
-bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config);
+HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig);
+void loadSettingsWindow(HWND hWnd, const Config* cfg);

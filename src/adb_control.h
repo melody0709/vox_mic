@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+std::string runCommandNoWindow(const std::string& cmdLine);
+
 class ADBControl {
 public:
     bool init(const std::string& preferredSerial = "");
@@ -18,6 +20,5 @@ public:
     bool removeForward(int port);
 
 private:
-    std::string runCommand(const std::string& cmd) const;
     std::string m_serial;
 };

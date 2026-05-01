@@ -1,4 +1,5 @@
 #include "tray_icon.h"
+#include "resource.h"
 #include <cstdio>
 
 #pragma comment(lib, "shell32.lib")
@@ -17,13 +18,15 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     m_nid.uID = ID_TRAYICON;
     m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     m_nid.uCallbackMessage = WM_TRAYICON;
-    m_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    m_nid.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON1));
     strcpy_s(m_nid.szTip, "AudioSource Win - Idle");
 
     m_hMenu = CreatePopupMenu();
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_START, "Start Bridge");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_STOP, "Stop Bridge");
-    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings...");
+    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings");
+    AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
+    AppendMenuA(m_hMenu, MF_GRAYED, 0, "v0.4.1");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_EXIT, "Exit");
 
@@ -46,13 +49,13 @@ void TrayIcon::updateIcon(bool isStreaming, bool isConnected) {
     if (!m_isCreated) return;
 
     if (isStreaming) {
-        m_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
         strcpy_s(m_nid.szTip, "AudioSource Win - Streaming");
     } else if (isConnected) {
-        m_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
         strcpy_s(m_nid.szTip, "AudioSource Win - Connected");
     } else {
-        m_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+        m_nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
         strcpy_s(m_nid.szTip, "AudioSource Win - Idle");
     }
 

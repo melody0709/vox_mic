@@ -1,10 +1,19 @@
 #include "settings_dialog.h"
+#include "adb_control.h"
+#include "tray_icon.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 #include <commctrl.h>
+#include <atomic>
+
+extern Config g_config;
+extern std::atomic<bool> g_running;
+extern std::atomic<bool> g_bridgeActive;
+extern TrayIcon* g_trayIcon;
+extern void syncDspAtomsFromConfig();
 
 #define SETTINGS_CLASS "AudioSourceSettingsClass"
 #define IDC_COMBO_DEVICE      2001
@@ -30,14 +39,8 @@
 #define IDC_BTN_RESET         2021
 #define IDC_CHECK_DEBUG       2022
 
-struct SettingsInit {
-    Config* pConfig;
-    bool*   pOk;
-};
-
 struct SettingsDialogData {
     Config* pConfig;
-    bool*   pOk;
     HWND hTab;
     std::vector<HWND> tabGeneralControls;
     std::vector<HWND> tabDspControls;
@@ -49,26 +52,30 @@ static void refreshDeviceList(HWND hCombo, const std::string& currentSerial) {
         (LPARAM)"Auto-detect (first available)");
     int selIdx = autoIdx;
 
-    FILE* pipe = _popen("adb devices", "r");
-    if (pipe) {
-        char line[256];
+    std::string result = runCommandNoWindow("adb devices");
+    if (!result.empty()) {
+        std::string line;
         bool first = true;
-        while (fgets(line, sizeof(line), pipe)) {
-            if (first) { first = false; continue; }
-            int len = (int)strlen(line);
-            if (len == 0) continue;
-            char* tab = strchr(line, '\t');
-            if (!tab) continue;
-            *tab = '\0';
-            if (strstr(tab + 1, "device")) {
-                while (len > 0 && (line[len - 1] == '\r' || line[len - 1] == '\n'))
-                    line[--len] = '\0';
-                int idx = (int)SendMessageA(hCombo, CB_ADDSTRING, 0, (LPARAM)line);
-                if (!currentSerial.empty() && currentSerial == std::string(line))
-                    selIdx = idx;
+        for (size_t i = 0, start = 0; i <= result.size(); i++) {
+            if (i == result.size() || result[i] == '\n') {
+                line = result.substr(start, i - start);
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                start = i + 1;
+
+                if (first) { first = false; continue; }
+                if (line.empty()) continue;
+                size_t tab = line.find('\t');
+                if (tab == std::string::npos) continue;
+                std::string serial = line.substr(0, tab);
+                std::string rest = line.substr(tab + 1);
+                if (rest.find("device") != std::string::npos) {
+                    int idx = (int)SendMessageA(hCombo, CB_ADDSTRING, 0, (LPARAM)serial.c_str());
+                    if (!currentSerial.empty() && currentSerial == serial)
+                        selIdx = idx;
+                }
             }
         }
-        _pclose(pipe);
     } else {
         SendMessageA(hCombo, CB_ADDSTRING, 0, (LPARAM)"(ADB not available)");
     }
@@ -103,8 +110,7 @@ static void showTabControls(const SettingsDialogData* pData, int tabIndex) {
     }
 }
 
-static void LoadConfigToUI(HWND hWnd, const Config* cfg) {
-    // Gain
+static void loadUiFromConfig(HWND hWnd, const Config* cfg) {
     int gainPos = (int)(cfg->gain * 100.0f);
     if (gainPos < 25) gainPos = 25;
     if (gainPos > 400) gainPos = 400;
@@ -114,7 +120,6 @@ static void LoadConfigToUI(HWND hWnd, const Config* cfg) {
     snprintf(gainText, sizeof(gainText), "%.2fx", cfg->gain);
     SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_GAIN), gainText);
 
-    // Hardware Algorithms
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_SETCHECK,
         cfg->nsEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_SETCHECK,
@@ -122,7 +127,6 @@ static void LoadConfigToUI(HWND hWnd, const Config* cfg) {
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_SETCHECK,
         cfg->agcEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 
-    // DSP
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_SETCHECK,
         cfg->eqEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 
@@ -143,9 +147,66 @@ static void LoadConfigToUI(HWND hWnd, const Config* cfg) {
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
         cfg->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
 
-    // Debug
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_SETCHECK,
         cfg->debugConsole ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+static void saveUiToConfig(HWND hWnd, Config* cfg) {
+    char buf[256];
+    int idx = (int)SendMessageA(GetDlgItem(hWnd, IDC_COMBO_DEVICE), CB_GETCURSEL, 0, 0);
+    if (idx <= 0) {
+        cfg->serial = "";
+    } else {
+        SendMessageA(GetDlgItem(hWnd, IDC_COMBO_DEVICE), CB_GETLBTEXT, (WPARAM)idx, (LPARAM)buf);
+        cfg->serial = buf;
+    }
+    GetWindowTextA(GetDlgItem(hWnd, IDC_HOST_EDIT), buf, sizeof(buf));
+    cfg->host = buf;
+    GetWindowTextA(GetDlgItem(hWnd, IDC_PORT_EDIT), buf, sizeof(buf));
+    cfg->port = atoi(buf);
+    if (cfg->port <= 0 || cfg->port > 65535)
+        cfg->port = 27183;
+
+    HWND hAppCombo = GetDlgItem(hWnd, IDC_COMBO_ANDROID_APP);
+    int appIdx = (int)SendMessageA(hAppCombo, CB_GETCURSEL, 0, 0);
+    cfg->androidAppPreset = appIdx;
+    if (appIdx == 1) {
+        cfg->androidSocket = "voxmicsource";
+        cfg->androidComponent = "com.voxmic.source/.MainActivity";
+    } else {
+        cfg->androidSocket = "audiosource";
+        cfg->androidComponent = "fr.dzx.audiosource/.MainActivity";
+    }
+
+    int gainPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_GAIN), TBM_GETPOS, 0, 0);
+    cfg->gain = (float)gainPos / 100.0f;
+    if (cfg->gain < 0.25f) cfg->gain = 0.25f;
+    if (cfg->gain > 4.0f) cfg->gain = 4.0f;
+
+    cfg->nsEnabled =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    cfg->aecEnabled =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    cfg->agcEnabled =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_GETCHECK, 0, 0) == BST_CHECKED);
+
+    cfg->eqEnabled =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    int presPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
+    cfg->eqPresence = (float)presPos / 10.0f;
+    if (cfg->eqPresence < 0.0f) cfg->eqPresence = 0.0f;
+    if (cfg->eqPresence > 6.0f) cfg->eqPresence = 6.0f;
+    int bassPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
+    cfg->eqBassCut = -(float)bassPos / 10.0f;
+    if (cfg->eqBassCut < -6.0f) cfg->eqBassCut = -6.0f;
+    if (cfg->eqBassCut > 0.0f) cfg->eqBassCut = 0.0f;
+    cfg->compressorEnabled =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    cfg->nrEnabled =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_GETCHECK, 0, 0) == BST_CHECKED);
+
+    cfg->debugConsole =
+        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
 }
 
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -154,15 +215,13 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     switch (msg) {
     case WM_CREATE: {
         CREATESTRUCTA* pCreate = (CREATESTRUCTA*)lParam;
-        SettingsInit* pInit = (SettingsInit*)pCreate->lpCreateParams;
+        Config* cfg = (Config*)pCreate->lpCreateParams;
         pData = new SettingsDialogData();
-        pData->pConfig = pInit->pConfig;
-        pData->pOk = pInit->pOk;
+        pData->pConfig = cfg;
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
 
         HINSTANCE hInst = pCreate->hInstance;
         
-        // Create Tab Control
         pData->hTab = CreateWindowExA(0, WC_TABCONTROLA, "",
             WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
             10, 10, 465, 360, hWnd, (HMENU)IDC_TAB_MAIN, hInst, NULL);
@@ -182,7 +241,6 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         auto addGen = [&](HWND h) { pData->tabGeneralControls.push_back(h); return h; };
         auto addDsp = [&](HWND h) { pData->tabDspControls.push_back(h); return h; };
 
-        // --- General Tab Controls ---
         addGen(CreateWindowExA(0, "STATIC", "ADB Device:",
             WS_CHILD | WS_VISIBLE,
             xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
@@ -202,7 +260,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE,
             xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", pData->pConfig->host.c_str(),
+        addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", cfg->host.c_str(),
             WS_CHILD | WS_VISIBLE,
             ctrlX, yBase + 1, 130, 21, hWnd, (HMENU)IDC_HOST_EDIT, hInst, NULL));
 
@@ -212,7 +270,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE,
             xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        std::string portStr = std::to_string(pData->pConfig->port);
+        std::string portStr = std::to_string(cfg->port);
         addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", portStr.c_str(),
             WS_CHILD | WS_VISIBLE,
             ctrlX, yBase + 1, 90, 21, hWnd, (HMENU)IDC_PORT_EDIT, hInst, NULL));
@@ -230,7 +288,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"Original AudioSource (gdzx) - DEFAULT / no effects");
         SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"VoxMic Source (improved) - 48000Hz / DEFAULT + NS + AEC");
 
-        int appSel = pData->pConfig->androidAppPreset;
+        int appSel = cfg->androidAppPreset;
         if (appSel < 0 || appSel > 1) appSel = 0;
         SendMessageA(hAppCombo, CB_SETCURSEL, (WPARAM)appSel, 0);
 
@@ -252,7 +310,6 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         yBase += 38;
 
-        // GroupBox for Android Hardware Algorithms
         addGen(CreateWindowExA(0, "BUTTON", "Android Hardware Algorithms",
             WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
             xMargin, yBase, 420, 95, hWnd, NULL, hInst, NULL));
@@ -280,12 +337,11 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
             xMargin, yBase, 200, 22, hWnd, (HMENU)IDC_CHECK_DEBUG, hInst, NULL));
 
-
         // --- DSP Tab Controls ---
         yBase = 55;
 
         addDsp(CreateWindowExA(0, "BUTTON", "EQ Enable",
-            WS_CHILD | BS_AUTOCHECKBOX, // Not visible initially
+            WS_CHILD | BS_AUTOCHECKBOX,
             xMargin, yBase, 100, 22, hWnd, (HMENU)IDC_CHECK_EQ, hInst, NULL));
 
         yBase += 35;
@@ -332,10 +388,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | BS_AUTOCHECKBOX,
             xMargin, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL));
 
-        // Load values into UI
-        LoadConfigToUI(hWnd, pData->pConfig);
+        loadUiFromConfig(hWnd, cfg);
 
-        // Buttons at the bottom
         int btnY = 385;
         
         CreateWindowExA(0, "BUTTON", "Reset to Defaults",
@@ -349,13 +403,19 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE,
             245, btnY, 75, 25, hWnd, (HMENU)IDC_BTN_CANCEL, hInst, NULL);
 
-        refreshDeviceList(hCombo, pData->pConfig->serial);
-
-        // Explicitly set font for all controls to match dialog default if possible
-        // (Optional, omitted for simplicity unless requested)
+        refreshDeviceList(hCombo, cfg->serial);
 
         return 0;
     }
+
+    case WM_TRAYICON:
+        if (lParam == WM_LBUTTONUP) {
+            ShowWindow(hWnd, SW_SHOW);
+            SetForegroundWindow(hWnd);
+        } else if (lParam == WM_RBUTTONUP || lParam == WM_CONTEXTMENU) {
+            if (g_trayIcon) g_trayIcon->showMenu(hWnd);
+        }
+        return 0;
 
     case WM_NOTIFY: {
         LPNMHDR lpnmhdr = (LPNMHDR)lParam;
@@ -391,125 +451,82 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             break;
         case IDC_BTN_RESET: {
             Config defaultCfg;
-            LoadConfigToUI(hWnd, &defaultCfg);
+            loadUiFromConfig(hWnd, &defaultCfg);
             break;
         }
-        case IDC_BTN_OK: {
-            char buf[256];
-            int idx = (int)SendMessageA(hCombo, CB_GETCURSEL, 0, 0);
-            if (idx <= 0) {
-                pData->pConfig->serial = "";
-            } else {
-                SendMessageA(hCombo, CB_GETLBTEXT, (WPARAM)idx, (LPARAM)buf);
-                pData->pConfig->serial = buf;
-            }
-            GetWindowTextA(GetDlgItem(hWnd, IDC_HOST_EDIT), buf, sizeof(buf));
-            pData->pConfig->host = buf;
-            GetWindowTextA(GetDlgItem(hWnd, IDC_PORT_EDIT), buf, sizeof(buf));
-            pData->pConfig->port = atoi(buf);
-            if (pData->pConfig->port <= 0 || pData->pConfig->port > 65535)
-                pData->pConfig->port = 27183;
-
-            HWND hAppCombo = GetDlgItem(hWnd, IDC_COMBO_ANDROID_APP);
-            int appIdx = (int)SendMessageA(hAppCombo, CB_GETCURSEL, 0, 0);
-            pData->pConfig->androidAppPreset = appIdx;
-            if (appIdx == 1) {
-                pData->pConfig->androidSocket = "voxmicsource";
-                pData->pConfig->androidComponent = "com.voxmic.source/.MainActivity";
-            } else {
-                pData->pConfig->androidSocket = "audiosource";
-                pData->pConfig->androidComponent = "fr.dzx.audiosource/.MainActivity";
-            }
-
-            int gainPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_GAIN), TBM_GETPOS, 0, 0);
-            pData->pConfig->gain = (float)gainPos / 100.0f;
-            if (pData->pConfig->gain < 0.25f) pData->pConfig->gain = 0.25f;
-            if (pData->pConfig->gain > 4.0f) pData->pConfig->gain = 4.0f;
-
-            pData->pConfig->nsEnabled =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_GETCHECK, 0, 0) == BST_CHECKED);
-            pData->pConfig->aecEnabled =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_GETCHECK, 0, 0) == BST_CHECKED);
-            pData->pConfig->agcEnabled =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_GETCHECK, 0, 0) == BST_CHECKED);
-
-            pData->pConfig->eqEnabled =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_GETCHECK, 0, 0) == BST_CHECKED);
-            int presPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
-            pData->pConfig->eqPresence = (float)presPos / 10.0f;
-            if (pData->pConfig->eqPresence < 0.0f) pData->pConfig->eqPresence = 0.0f;
-            if (pData->pConfig->eqPresence > 6.0f) pData->pConfig->eqPresence = 6.0f;
-            int bassPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
-            pData->pConfig->eqBassCut = -(float)bassPos / 10.0f;
-            if (pData->pConfig->eqBassCut < -6.0f) pData->pConfig->eqBassCut = -6.0f;
-            if (pData->pConfig->eqBassCut > 0.0f) pData->pConfig->eqBassCut = 0.0f;
-            pData->pConfig->compressorEnabled =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_GETCHECK, 0, 0) == BST_CHECKED);
-            pData->pConfig->nrEnabled =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_GETCHECK, 0, 0) == BST_CHECKED);
-
-            pData->pConfig->debugConsole =
-                (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
-
+        case IDC_BTN_OK:
+            saveUiToConfig(hWnd, pData->pConfig);
             pData->pConfig->save();
-            *(pData->pOk) = true;
-            DestroyWindow(hWnd);
+            syncDspAtomsFromConfig();
+            ShowWindow(hWnd, SW_HIDE);
             break;
-        }
         case IDC_BTN_CANCEL:
-            DestroyWindow(hWnd);
+            loadUiFromConfig(hWnd, pData->pConfig);
+            ShowWindow(hWnd, SW_HIDE);
+            break;
+
+        case ID_MENU_START:
+            g_bridgeActive.store(true);
+            break;
+        case ID_MENU_STOP:
+            g_bridgeActive.store(false);
+            break;
+        case ID_MENU_SETTINGS:
+            ShowWindow(hWnd, SW_SHOW);
+            SetForegroundWindow(hWnd);
+            break;
+        case ID_MENU_EXIT:
+            if (g_trayIcon) g_trayIcon->destroy();
+            g_running.store(false);
+            PostQuitMessage(0);
             break;
         }
         return 0;
     }
 
+    case WM_CLOSE:
+        ShowWindow(hWnd, SW_HIDE);
+        return 0;
+
     case WM_DESTROY:
         delete pData;
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, 0);
-        return 0;
-
-    case WM_CLOSE:
-        DestroyWindow(hWnd);
         return 0;
     }
 
     return DefWindowProcA(hWnd, msg, wParam, lParam);
 }
 
-bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
-    static bool classRegistered = false;
+void loadSettingsWindow(HWND hWnd, const Config* cfg) {
+    loadUiFromConfig(hWnd, cfg);
+}
+
+HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
     static bool ccInitialized = false;
     if (!ccInitialized) {
         INITCOMMONCONTROLSEX icc = { sizeof(INITCOMMONCONTROLSEX), ICC_BAR_CLASSES | ICC_TAB_CLASSES };
         InitCommonControlsEx(&icc);
         ccInitialized = true;
     }
-    if (!classRegistered) {
-        WNDCLASSEXA wc = {};
-        wc.cbSize = sizeof(WNDCLASSEXA);
-        wc.lpfnWndProc = SettingsWndProc;
-        wc.hInstance = hInstance;
-        wc.lpszClassName = SETTINGS_CLASS;
-        wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-        RegisterClassExA(&wc);
-        classRegistered = true;
-    }
 
-    Config tempConfig = config;
-    bool ok = false;
-
-    SettingsInit init = { &tempConfig, &ok };
+    WNDCLASSEXA wc = {};
+    wc.cbSize = sizeof(WNDCLASSEXA);
+    wc.lpfnWndProc = SettingsWndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = SETTINGS_CLASS;
+    wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    RegisterClassExA(&wc);
 
     HWND hWnd = CreateWindowExA(
         WS_EX_DLGMODALFRAME,
         SETTINGS_CLASS,
         "AudioSource Win - Settings",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        WS_POPUP | WS_CAPTION | WS_SYSMENU,
         0, 0, 500, 460,
-        hParent, NULL, hInstance, &init);
+        NULL, NULL, hInstance, pConfig);
 
-    if (!hWnd) return false;
+    if (!hWnd) return NULL;
 
     RECT childRect;
     GetWindowRect(hWnd, &childRect);
@@ -522,30 +539,5 @@ bool showSettingsDialog(HINSTANCE hInstance, HWND hParent, Config& config) {
         (screenH - childH) / 2,
         0, 0, SWP_NOSIZE | SWP_NOZORDER);
 
-    EnableWindow(hParent, FALSE);
-
-    MSG msg;
-    while (IsWindow(hWnd)) {
-        BOOL bRet = GetMessageA(&msg, NULL, 0, 0);
-        if (bRet <= 0) {
-            if (bRet == 0)
-                PostQuitMessage((int)msg.wParam);
-            break;
-        }
-        
-        // Handling tab key navigation if needed (optional for basic dialog)
-        if (!IsDialogMessageA(hWnd, &msg)) {
-            TranslateMessage(&msg);
-            DispatchMessageA(&msg);
-        }
-    }
-
-    EnableWindow(hParent, TRUE);
-    SetForegroundWindow(hParent);
-
-    if (ok) {
-        config = tempConfig;
-        return true;
-    }
-    return false;
+    return hWnd;
 }
