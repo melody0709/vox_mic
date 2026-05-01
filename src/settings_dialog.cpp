@@ -12,6 +12,7 @@
 extern Config g_config;
 extern std::atomic<bool> g_running;
 extern std::atomic<bool> g_bridgeActive;
+extern std::atomic<bool> g_demandMode;
 extern TrayIcon* g_trayIcon;
 extern void syncDspAtomsFromConfig();
 
@@ -471,6 +472,19 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         case ID_MENU_STOP:
             g_bridgeActive.store(false);
             break;
+        case ID_MENU_DEMAND_MODE: {
+            bool newVal = !g_demandMode.load();
+            g_demandMode.store(newVal);
+            if (g_trayIcon) g_trayIcon->setDemandMode(newVal);
+            g_config.demandMode = newVal;
+            g_config.save();
+            if (newVal)
+                printf("[Demand] Mode ON (mic monitor active)\n");
+            else
+                printf("[Demand] Mode OFF (always stream)\n");
+            fflush(stdout);
+            break;
+        }
         case ID_MENU_SETTINGS:
             ShowWindow(hWnd, SW_SHOW);
             SetForegroundWindow(hWnd);

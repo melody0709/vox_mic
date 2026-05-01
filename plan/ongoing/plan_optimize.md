@@ -14,6 +14,36 @@
 | Phase 6B | **官方 RNNoise 神经网络降噪** | ✅ 已完成 |
 | **Phase 6C** | **DeepFilterNet3 升级** (可选) | ⬜ 待评估 |
 | Phase 7 | WiFi ADB + 断连平滑 + 设备恢复 | ✅ 已可用 (WiFi ADB 已支持) |
+| Phase 5 | 隐藏到托盘 GUI + ADB 无闪烁 | ✅ 已完成 (v0.4.1) |
+| **Phase 8** | **CPU 优化 (空闲 0-0.1%)** | **✅ 已完成 (v0.4.2)** |
+
+---
+
+## Phase 8: CPU 占用优化 — ✅ 已完成 (v0.4.2)
+
+### 根因确认 + 优化历程 ✅
+
+| 阶段 | 做法 | 空闲 CPU |
+|------|------|----------|
+| v0.4.0 原始 monitor | 每 100ms `Activate(IAudioSessionManager2)` + 枚举 + `Release` | 0.2-0.4% |
+| 方案 A COM 缓存 | `init()` 时缓存 `IAudioSessionManager2`，每 100ms 仅创建枚举器 | 0.15-0.25% |
+| **方案 B 事件驱动** | `IAudioSessionNotification` + `IAudioSessionEvents` 回调，零轮询 | **0-0.1%** ✅ |
+
+**关键发现**: DSP 实际开销仅 ~0.1%（远低于设计文档预估 ~1.65%），monitor 的 COM 轮询是唯一 CPU 瓶颈。
+
+### Demand Mode 开关 (Debug Toggle)
+
+右键托盘菜单 "Demand Mode" 勾选，控制按需激活开关，持久化到注册表。用户可自行对比 Demand ON/OFF 的 CPU 差异。
+
+### 最终效果
+
+```
+Demand Mode ON:  空闲 CPU 0-0.1%  ← 事件驱动 COM 回调，零轮询
+Demand Mode OFF: 空闲 CPU 0-0.1%  ← 无 monitor，bridge 始终推流
+Python 版本:     空闲 CPU 0-0.1%  ← 无 monitor，无 DSP
+```
+
+三者持平。Phase 8 目标达成。
 
 ---
 

@@ -1,4 +1,4 @@
-# AGENTS.md — v0.4.1
+# AGENTS.md — v0.4.2
 
 ## 项目概述
 
@@ -62,11 +62,12 @@ build\audiosource.exe
 | 直接运行 | 程序启动，隐藏到系统托盘 |
 | 左键托盘图标 | 弹出设置窗口 |
 | 关闭设置窗口 [X] | 隐藏到托盘（不退出） |
+| 右键托盘菜单 → Demand Mode | 切换按需激活开/关（持久化到注册表） |
 | 右键托盘菜单 → Exit | 彻底退出 |
 
 在 Windows 应用中选择 **CABLE Output** 作为麦克风。
 
-## v0.4.1 关键参数
+## v0.4.2 关键参数
 
 ### 传输参数
 
@@ -81,12 +82,15 @@ build\audiosource.exe
 | Android AudioRecord 缓冲 | `1 × minBufSize` (~10ms) | `RecordService.java:101` |
 | 总延迟 | **~40ms** (实测) | |
 
-### 按需激活参数 (Phase 3)
+### 按需激活参数 (Phase 3 + Phase 8)
 
 | 参数 | 值 | 位置 |
 |------|-----|------|
-| Monitor 轮询间隔 | 100ms | `main.cpp:72` |
-| 检测延迟 (实测) | **~12ms** | monitor ON → bridge push |
+| Monitor 检测方式 | **事件驱动** (IAudioSessionNotification + IAudioSessionEvents) | `mic_usage_monitor.h/cpp` |
+| Monitor 线程 | `Sleep(1000)` 仅保持 COM 公寓存活 | `main.cpp` |
+| 检测延迟 | **即时** (COM 回调) | 事件驱动，无需轮询 |
+| Demand Mode 开关 | 右键托盘菜单，持久化到注册表 | `tray_icon.cpp`, `config.h/cpp` |
+| 空闲 CPU | **0-0.1%** | 事件驱动，零 COM 调用 |
 | 空闲 ring buffer reset | 5s (50 × 100ms) | `main.cpp:170-173` |
 | Socket stall 断连阈值 | 9s (90 × 100ms) | `main.cpp:137` |
 | Bridge 重连延迟 | ~200ms (仅 socket, 不走 ADB) | `main.cpp` |
@@ -102,7 +106,7 @@ build\audiosource.exe
 | Compressor | -18dBFS, 3:1, 5/50ms | `g_compressorEnabled` | `dsp/pipeline.h` |
 | Limiter | -1dBFS | 始终 | `dsp/pipeline.h` |
 
-### 配置字段 (18)
+### 配置字段 (19)
 
 | 分类 | 字段 | 类型 | 默认 |
 |------|------|------|------|
@@ -113,6 +117,7 @@ build\audiosource.exe
 | DSP | eqEnabled / compressorEnabled / nrEnabled | bool | true/true/true |
 | DSP | eqPresence / eqBassCut | float (0~6 / -6~0) | 3.0 / -3.0 |
 | 界面 | debugConsole | bool | true |
+| 按需 | demandMode | bool | true |
 
 ### 全局原子变量
 
@@ -127,6 +132,7 @@ build\audiosource.exe
 | `g_micRequested` | Windows 应用是否在捕获 (Phase 3) | monitor → bridge |
 | `g_micStreaming` | 当前是否在推流 (Phase 3) | bridge → tray |
 | `g_micOnTick` | 检测延迟时间戳 (Phase 3) | monitor → bridge |
+| `g_demandMode` | Demand Mode 开关 (Phase 8) | tray → monitor/bridge |
 
 `syncDspAtomsFromConfig()` 在 `main.cpp`，启动和每次重连时调用。
 
@@ -143,7 +149,7 @@ src/
 ├── tray_icon.h/cpp            # 系统托盘 + 右键菜单 (含版本号)
 ├── config.h/cpp               # 注册表持久化 (18 字段)
 ├── settings_dialog.h/cpp       # 主窗口 UI (非模态, 关闭即隐藏到托盘)
-├── mic_usage_monitor.h/cpp   # Phase 3: IAudioSessionManager2 按需检测
+├── mic_usage_monitor.h/cpp   # Phase 3+8: 事件驱动 (IAudioSessionNotification + IAudioSessionEvents)
 └── dsp/
     ├── biquad.h              # BiQuad IIR 滤波器
     ├── pipeline.h            # DSP 链 (RNNoise→HPF→EQ→Comp→Limiter)
@@ -162,7 +168,7 @@ src/
 
 ```
 main thread:         消息泵 + SetTimer(stats)
-monitor thread:      100ms 轮询 IAudioSessionManager2 → g_micRequested (Phase 3)
+monitor thread:      Sleep(1000) 仅保持 COM 公寓存活 (Phase 8 事件驱动)
 bridge thread:       ADB 管理 + Socket recv → g_micRequested 门控 → ring buffer push/discard
 render thread:       ring buffer pop → int16→float → DspPipeline → WASAPI write
 ```
@@ -175,7 +181,7 @@ render thread:       ring buffer pop → int16→float → DspPipeline → WASAP
 
 ## Phase 3 — 麦克风按需激活 (已完成 v0.4.0)
 
-- **MicUsageMonitor**: `src/mic_usage_monitor.h/cpp` — IAudioSessionManager2 100ms 轮询检测 CABLE Output 捕获状态
+- **MicUsageMonitor**: `src/mic_usage_monitor.h/cpp` — IAudioSessionManager2 按需检测 CABLE Output 捕获状态
 - **Always Hot**: bridge 永不主动断连 socket，空闲时 recv + 丢弃，不 push ring buffer
 - **ADB 一次性初始化**: `SetupAudioSource` 只在启动时调用，socket 重连仅 `connect()` (~200ms)
 - **检测延迟实测 ~12ms** (monitor ON → bridge 首块 push)
@@ -190,6 +196,14 @@ render thread:       ring buffer pop → int16→float → DspPipeline → WASAP
 - **ADB 无闪烁**: `_popen` → `CreateProcess(NULL, …, CREATE_NO_WINDOW, …)`，`runCommandNoWindow()` 公开共用
 - **设置即主窗口**: 右键菜单 "Settings" 显示设置窗口，OK 保存隐藏，Cancel 恢复隐藏
 - **版本号**: 托盘右键菜单底部灰色 `v0.4.1`
+
+## Phase 8 — CPU 优化 (已完成 v0.4.2)
+
+- **事件驱动 Monitor**: `IAudioSessionNotification` + `IAudioSessionEvents` COM 回调替代 100ms 轮询
+- **零 COM 开销**: 空闲时无 `GetSessionEnumerator()` / `Activate()` / `Release()` 调用
+- **Demand Mode 开关**: 右键托盘菜单，持久化到注册表，用户可对比观察 CPU
+- **DSP 开销实测**: 仅 ~0.1%（远低于 Phase 3 设计文档预估的 ~1.65%）
+- **空闲 CPU**: 0-0.1%（从 v0.4.1 的 0.2-0.4% 优化）
 
 ## Next: DeepFilterNet3 (Phase 6C)
 

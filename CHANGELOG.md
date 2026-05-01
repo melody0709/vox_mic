@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.4.2 (2026-05-02)
+
+### Phase 8: CPU 优化 + 事件驱动 Monitor
+
+| 特性 | 说明 |
+|------|------|
+| **事件驱动 Monitor** | `IAudioSessionNotification` + `IAudioSessionEvents` 回调替代 100ms 轮询，零 COM 开销 |
+| **Demand Mode 开关** | 右键托盘菜单 "Demand Mode" 勾选，控制按需激活开关 |
+| **Demand Mode 持久化** | 设置保存到注册表，重启后保持状态 |
+| **空闲 CPU** | Demand ON: **0-0.1%**（从 v0.4.1 的 0.2-0.4% 优化） |
+| **DSP 开销实测** | 仅 ~0.1%（远低于设计文档预估的 ~1.65%） |
+
+#### 优化历程
+
+| 阶段 | 做法 | CPU |
+|------|------|-----|
+| v0.4.0 monitor 轮询 | 每 100ms `Activate(IAudioSessionManager2)` + 枚举 + `Release` | 0.2-0.4% |
+| 方案 A COM 缓存 | `init()` 时创建并缓存 `IAudioSessionManager2`，每 100ms 仅创建枚举器 | 0.15-0.25% |
+| 方案 B 事件驱动 | `IAudioSessionNotification` + `IAudioSessionEvents` 回调，零轮询 | **0-0.1%** |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/mic_usage_monitor.h` | 重写：实现 `IAudioSessionNotification` + `IAudioSessionEvents` COM 接口 |
+| `src/mic_usage_monitor.cpp` | 重写：事件驱动 `OnStateChanged` 更新 `g_micRequested`，`OnSessionCreated` 注册新会话 |
+| `src/main.cpp` | `g_micRequested` 非 static 可 extern；monitor 线程仅 `Sleep(1000)` 保持 COM 公寓 |
+| `src/main.cpp` | 新增 `g_demandMode` 原子变量，从 Config 初始化 |
+| `src/tray_icon.h/cpp` | 新增 `ID_MENU_DEMAND_MODE` 菜单项 + `setDemandMode()` |
+| `src/settings_dialog.cpp` | Demand Mode 菜单切换逻辑 + 注册表保存 |
+| `src/config.h/cpp` | 新增 `demandMode` 字段（19 字段），注册表持久化 |
+
+---
+
 ## v0.4.1 (2026-05-02)
 
 ### Phase 5: 隐藏到托盘 GUI + ADB 无闪烁

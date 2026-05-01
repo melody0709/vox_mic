@@ -1,4 +1,4 @@
-# 未来路线图 — v0.4.1+
+# 未来路线图 — v0.4.2+
 
 ## 已完成 ✅
 
@@ -25,6 +25,12 @@
   - /SUBSYSTEM:WINDOWS 零控制台启动
   - Debug Console 按需 AllocConsole
   - 版本号 v0.4.1 显示于托盘菜单
+- ✅ **Phase 8: CPU 优化** (v0.4.2)
+  - 事件驱动 Monitor: IAudioSessionNotification + IAudioSessionEvents COM 回调
+  - 零 COM 轮询: 空闲时无 GetSessionEnumerator/Activate/Release
+  - Demand Mode 开关: 右键托盘菜单，持久化到注册表
+  - DSP 开销实测仅 ~0.1%（远低于预估 ~1.65%）
+  - 空闲 CPU 0-0.1%（从 v0.4.1 的 0.2-0.4% 优化）
 
 ## 后续 Phase
 
@@ -51,4 +57,5 @@
 | ~~8~~ | ~~麦克风按需激活~~ | ✅ v0.4.0 |
 | ~~9~~ | ~~WiFi ADB~~ | ✅ 已可用 |
 | ~~10~~ | ~~隐藏到托盘 GUI~~ | ✅ v0.4.1 |
-| 11 | 自定义图标 | 1h | |
+| ~~11~~ | ~~CPU 优化 + 事件驱动 Monitor~~ | ✅ v0.4.2 |
+| 12 | 自定义图标 | 1h | — |

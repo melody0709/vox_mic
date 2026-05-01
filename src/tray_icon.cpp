@@ -24,9 +24,10 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     m_hMenu = CreatePopupMenu();
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_START, "Start Bridge");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_STOP, "Stop Bridge");
+    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_DEMAND_MODE, "Demand Mode");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(m_hMenu, MF_GRAYED, 0, "v0.4.1");
+    AppendMenuA(m_hMenu, MF_GRAYED, 0, "v0.4.2");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_EXIT, "Exit");
 
@@ -71,6 +72,12 @@ void TrayIcon::showMenu(HWND hWnd) {
     SetForegroundWindow(hWnd);
     TrackPopupMenu(m_hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, NULL);
     PostMessage(hWnd, WM_NULL, 0, 0);
+}
+
+void TrayIcon::setDemandMode(bool on) {
+    if (!m_isCreated || !m_hMenu) return;
+    CheckMenuItem(m_hMenu, ID_MENU_DEMAND_MODE,
+        on ? MF_CHECKED : MF_UNCHECKED);
 }
 
 void TrayIcon::showTooltip(const char* text) {

@@ -86,6 +86,10 @@ Config Config::load() {
         if (RegQueryValueExA(hKey, "DebugConsole", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
             cfg.debugConsole = (flagVal != 0);
         }
+        size = sizeof(flagVal);
+        if (RegQueryValueExA(hKey, "DemandMode", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
+            cfg.demandMode = (flagVal != 0);
+        }
 
         RegCloseKey(hKey);
     }
@@ -132,6 +136,8 @@ void Config::save() const {
         RegSetValueExA(hKey, "NrEnabled", 0, REG_DWORD, (const BYTE*)&nrVal, sizeof(nrVal));
         DWORD debugVal = debugConsole ? 1 : 0;
         RegSetValueExA(hKey, "DebugConsole", 0, REG_DWORD, (const BYTE*)&debugVal, sizeof(debugVal));
+        DWORD demandVal = demandMode ? 1 : 0;
+        RegSetValueExA(hKey, "DemandMode", 0, REG_DWORD, (const BYTE*)&demandVal, sizeof(demandVal));
 
         RegCloseKey(hKey);
     }

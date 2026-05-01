@@ -1,4 +1,4 @@
-# 架构说明 — v0.4.1
+# 架构说明 — v0.4.2
 
 ## 数据流
 
@@ -10,7 +10,7 @@ VoxMic Source App (DEFAULT 源 + 可选 NS/AEC/AGC)
 ADB 转发 (tcp:27183)
     ↓ TCP (960 字节/块 = 480 帧)
 audiosource.exe
-    ├── MicUsageMonitor 线程 (100ms 轮询 IAudioSessionManager2)
+    ├── MicUsageMonitor 线程 (事件驱动: IAudioSessionNotification + IAudioSessionEvents)
     │       └→ g_micRequested (atomic<bool>)
     │
     ├── Socket 接收线程 (Always Hot, 永不主动断连)
@@ -50,7 +50,7 @@ audiosource.exe
 | `tray_icon.h/cpp` | 系统托盘 + 右键菜单 (含灰度版本号) |
 | `config.h/cpp` | 注册表持久化 (**18 字段**) |
 | `settings_dialog.h/cpp` | **主窗口** GUI (设备/网络/App/音效/DSP/Debug，非模态持久窗口) |
-| **`mic_usage_monitor.h/cpp`** | Phase 3: IAudioSessionManager2 轮询检测 CABLE Output 捕获状态 |
+| **`mic_usage_monitor.h/cpp`** | Phase 3+8: 事件驱动 (IAudioSessionNotification + IAudioSessionEvents) |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
 | **`dsp/pipeline.h`** | DSP 链调度 (RNNoise→HPF→EQ→Comp→Limiter) |
 | **`dsp/rnnoise/` (27 文件)** | 官方 RNNoise v0.2 源码 + 预生成模型 (来源: werman fork) |
@@ -93,13 +93,14 @@ audiosource.exe
 | Bass Cut | -3.0 dB | `g_eqBassCut` | slider -6–0dB |
 | Comp Enable | true | `g_compressorEnabled` | checkbox |
 
-## Phase 3: 按需激活
+## Phase 3+8: 按需激活 + 事件驱动
 
 | 参数 | 值 | 原子变量 | 线程 |
 |------|-----|----------|------|
-| Monitor 轮询 | 100ms IAudioSessionManager2 | `g_micRequested` | monitor |
+| Monitor 检测 | 事件驱动 (COM 回调) | `g_micRequested` | monitor |
 | 推流门控 | discard when `!g_micRequested` | `g_micStreaming` | bridge → tray |
-| 检测延迟 | ~12ms (实测) | `g_micOnTick` | monitor → bridge |
+| 检测延迟 | 即时 (COM 回调) | `g_micOnTick` | monitor → bridge |
+| Demand Mode 开关 | 右键托盘，持久化到注册表 | `g_demandMode` | tray → monitor |
 | 空闲 ring buffer reset | 5s (50 × 100ms) | — | bridge |
 | Socket stall 断连 | 9s (90 × 100ms) | — | bridge |
 
@@ -107,7 +108,7 @@ audiosource.exe
 
 ```
 main thread:         消息泵 + SetTimer(stats, 5s)
-monitor thread:      100ms 轮询 IAudioSessionManager2 → g_micRequested (Phase 3)
+monitor thread:      Sleep(1000) 仅保持 COM 公寓存活 (Phase 8 事件驱动)
 bridge thread:       ADB 一次性初始化 (CreateProcess NO_WINDOW) + Socket Always Hot → g_micRequested 门控 → ring buffer push/discard
 render thread:       事件驱动 ring buffer pop → int16→float → DspPipeline (47µs/块) → WASAPI write
 ```

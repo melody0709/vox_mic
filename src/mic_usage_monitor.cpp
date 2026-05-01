@@ -1,14 +1,92 @@
 #include "mic_usage_monitor.h"
+#include <cstdio>
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
-#include <cstdio>
 
 #pragma comment(lib, "ole32.lib")
+
+extern std::atomic<bool> g_micRequested;
 
 MicUsageMonitor::MicUsageMonitor() {}
 
 MicUsageMonitor::~MicUsageMonitor() {
     shutdown();
+}
+
+STDMETHODIMP MicUsageMonitor::QueryInterface(REFIID riid, void** ppv) {
+    if (!ppv) return E_POINTER;
+    if (riid == __uuidof(IUnknown)) {
+        *ppv = static_cast<IUnknown*>(static_cast<IAudioSessionNotification*>(this));
+    } else if (riid == __uuidof(IAudioSessionNotification)) {
+        *ppv = static_cast<IAudioSessionNotification*>(this);
+    } else if (riid == __uuidof(IAudioSessionEvents)) {
+        *ppv = static_cast<IAudioSessionEvents*>(this);
+    } else {
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+}
+
+STDMETHODIMP_(ULONG) MicUsageMonitor::AddRef() {
+    return InterlockedIncrement(&m_refCount);
+}
+
+STDMETHODIMP_(ULONG) MicUsageMonitor::Release() {
+    return InterlockedDecrement(&m_refCount);
+}
+
+STDMETHODIMP MicUsageMonitor::OnSessionCreated(IAudioSessionControl *NewSession) {
+    if (m_stopping.load(std::memory_order_relaxed)) return S_OK;
+    registerEventsOnSession(NewSession);
+    return S_OK;
+}
+
+STDMETHODIMP MicUsageMonitor::OnStateChanged(AudioSessionState NewState) {
+    if (m_stopping.load(std::memory_order_relaxed)) return S_OK;
+
+    if (NewState == AudioSessionStateActive) {
+        if (m_activeCount.fetch_add(1, std::memory_order_relaxed) == 0) {
+            g_micRequested.store(true, std::memory_order_relaxed);
+        }
+    } else if (NewState == AudioSessionStateInactive) {
+        int prev = m_activeCount.fetch_sub(1, std::memory_order_relaxed);
+        if (prev == 1) {
+            g_micRequested.store(false, std::memory_order_relaxed);
+        }
+    }
+    // AudioSessionStateExpired: ignore (always follows Inactive)
+    return S_OK;
+}
+
+STDMETHODIMP MicUsageMonitor::OnSessionDisconnected(AudioSessionDisconnectReason DisconnectReason) {
+    return S_OK;
+}
+
+void MicUsageMonitor::registerEventsOnSession(IAudioSessionControl* pSession) {
+    if (!pSession) return;
+
+    AudioSessionState state;
+    HRESULT hr = pSession->GetState(&state);
+    if (SUCCEEDED(hr) && state == AudioSessionStateActive) {
+        m_activeCount.fetch_add(1, std::memory_order_relaxed);
+        g_micRequested.store(true, std::memory_order_relaxed);
+    }
+
+    hr = pSession->RegisterAudioSessionNotification(static_cast<IAudioSessionEvents*>(this));
+    if (SUCCEEDED(hr)) {
+        std::lock_guard<std::mutex> lock(m_sessionsMutex);
+        m_registeredSessions.push_back(pSession);
+    }
+}
+
+void MicUsageMonitor::unregisterAllSessions() {
+    std::lock_guard<std::mutex> lock(m_sessionsMutex);
+    for (auto* pSession : m_registeredSessions) {
+        pSession->UnregisterAudioSessionNotification(static_cast<IAudioSessionEvents*>(this));
+    }
+    m_registeredSessions.clear();
 }
 
 bool MicUsageMonitor::init() {
@@ -39,64 +117,66 @@ bool MicUsageMonitor::init() {
     }
     m_pDevice = pDevice;
 
+    IAudioSessionManager2* pSessionManager = nullptr;
+    hr = pDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, NULL, (void**)&pSessionManager);
+    if (FAILED(hr)) {
+        printf("MicUsageMonitor: Activate IAudioSessionManager2 failed 0x%08lx\n", hr);
+        pDevice->Release(); m_pDevice = nullptr;
+        pEnumerator->Release(); m_pEnumerator = nullptr;
+        CoUninitialize();
+        return false;
+    }
+    m_pSessionManager = pSessionManager;
+
+    hr = pSessionManager->RegisterSessionNotification(
+        static_cast<IAudioSessionNotification*>(this));
+    if (FAILED(hr)) {
+        printf("MicUsageMonitor: RegisterSessionNotification failed 0x%08lx\n", hr);
+    }
+
+    IAudioSessionEnumerator* pEnum = nullptr;
+    hr = pSessionManager->GetSessionEnumerator(&pEnum);
+    if (SUCCEEDED(hr)) {
+        int count = 0;
+        pEnum->GetCount(&count);
+        for (int i = 0; i < count; i++) {
+            IAudioSessionControl* pSessionControl = nullptr;
+            if (SUCCEEDED(pEnum->GetSession(i, &pSessionControl))) {
+                registerEventsOnSession(pSessionControl);
+            }
+        }
+        pEnum->Release();
+    }
+
     m_initialized = true;
-    printf("MicUsageMonitor: initialized\n");
+    printf("MicUsageMonitor: initialized (event-driven)\n");
     return true;
 }
 
 void MicUsageMonitor::shutdown() {
+    m_stopping.store(true, std::memory_order_relaxed);
+
+    if (m_pSessionManager) {
+        m_pSessionManager->UnregisterSessionNotification(
+            static_cast<IAudioSessionNotification*>(this));
+    }
+
+    unregisterAllSessions();
+
+    if (m_pSessionManager) {
+        m_pSessionManager->Release();
+        m_pSessionManager = nullptr;
+    }
     if (m_pDevice) {
-        ((IMMDevice*)m_pDevice)->Release();
+        m_pDevice->Release();
         m_pDevice = nullptr;
     }
     if (m_pEnumerator) {
-        ((IMMDeviceEnumerator*)m_pEnumerator)->Release();
+        m_pEnumerator->Release();
         m_pEnumerator = nullptr;
     }
     if (m_initialized) {
         CoUninitialize();
         m_initialized = false;
     }
-}
-
-bool MicUsageMonitor::isCaptureActive() {
-    if (!m_initialized || !m_pDevice)
-        return false;
-
-    IMMDevice* pDevice = (IMMDevice*)m_pDevice;
-
-    IAudioSessionManager2* pSessionManager = nullptr;
-    HRESULT hr = pDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, NULL, (void**)&pSessionManager);
-    if (FAILED(hr)) return false;
-
-    IAudioSessionEnumerator* pEnumerator = nullptr;
-    hr = pSessionManager->GetSessionEnumerator(&pEnumerator);
-    pSessionManager->Release();
-    if (FAILED(hr)) return false;
-
-    int count = 0;
-    hr = pEnumerator->GetCount(&count);
-    if (FAILED(hr)) {
-        pEnumerator->Release();
-        return false;
-    }
-
-    bool active = false;
-    for (int i = 0; i < count; i++) {
-        IAudioSessionControl* pSessionControl = nullptr;
-        hr = pEnumerator->GetSession(i, &pSessionControl);
-        if (FAILED(hr)) continue;
-
-        AudioSessionState state;
-        hr = pSessionControl->GetState(&state);
-        pSessionControl->Release();
-
-        if (SUCCEEDED(hr) && state == AudioSessionStateActive) {
-            active = true;
-            break;
-        }
-    }
-
-    pEnumerator->Release();
-    return active;
 }

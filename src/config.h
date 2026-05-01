@@ -20,6 +20,7 @@ public:
     bool compressorEnabled = true;
     bool nrEnabled = true;
     bool debugConsole = true;
+    bool demandMode = true;
 
     static Config load();
     void save() const;

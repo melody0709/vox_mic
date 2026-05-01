@@ -17,7 +17,7 @@
 #define DEFAULT_PORT 27183
 #define STATS_INTERVAL_MS 5000
 
-static Config g_config;
+Config g_config;
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_bridgeActive{true};
 static std::atomic<bool> g_streaming{false};
@@ -27,8 +27,9 @@ std::atomic<float> g_eqPresence{3.0f};
 std::atomic<float> g_eqBassCut{-3.0f};
 std::atomic<bool> g_compressorEnabled{true};
 std::atomic<bool> g_nrEnabled{true};
-static std::atomic<bool> g_micRequested{false};
+std::atomic<bool> g_micRequested{false};
 static std::atomic<bool> g_micStreaming{false};
+std::atomic<bool> g_demandMode{true};
 static std::atomic<uint64_t> g_micOnTick{0};
 static MicUsageMonitor g_micMonitor;
 static std::thread g_monitorThread;
@@ -72,17 +73,13 @@ VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
 }
 
 void micMonitorThread() {
-    bool lastState = false;
     while (g_running.load(std::memory_order_relaxed)) {
-        bool active = g_micMonitor.isCaptureActive();
-        if (active != lastState) {
-            printf("[Monitor] mic=%s\n", active ? "ON" : "OFF");
-            fflush(stdout);
-            lastState = active;
-            if (active) g_micOnTick.store(GetTickCount64(), std::memory_order_relaxed);
+        if (!g_demandMode.load(std::memory_order_relaxed)) {
+            g_micRequested.store(true, std::memory_order_relaxed);
+            Sleep(500);
+            continue;
         }
-        g_micRequested.store(active, std::memory_order_relaxed);
-        Sleep(100);
+        Sleep(1000);
     }
 }
 
@@ -186,7 +183,10 @@ void audioBridgeThread() {
                 break;
             }
 
-            if (!g_micRequested.load(std::memory_order_relaxed)) {
+            bool micRequested = g_micRequested.load(std::memory_order_relaxed);
+            bool demandOff = !g_demandMode.load(std::memory_order_relaxed);
+
+            if (!micRequested && !demandOff) {
                 g_micStreaming.store(false);
                 idleCount++;
                 wasIdle = true;
@@ -241,6 +241,7 @@ void audioBridgeThread() {
 int main(int argc, char* argv[]) {
     g_config = Config::load();
     syncDspAtomsFromConfig();
+    g_demandMode.store(g_config.demandMode, std::memory_order_relaxed);
 
     bool listDevices = false;
     bool showHelp = false;
@@ -307,6 +308,7 @@ int main(int argc, char* argv[]) {
     TrayIcon trayIcon;
     g_trayIcon = &trayIcon;
     trayIcon.create(hInstance, hWnd);
+    trayIcon.setDemandMode(g_config.demandMode);
 
     SetTimer(hWnd, 1, STATS_INTERVAL_MS, statsTimerProc);
 
