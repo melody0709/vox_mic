@@ -9,9 +9,9 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_microphone"
+        android:icon="@drawable/voxmic_streaming"
         android:label="@string/app_name"
-        android:roundIcon="@drawable/ic_microphone"
+        android:roundIcon="@drawable/voxmic_streaming"
         android:theme="@android:style/Theme.Translucent.NoTitleBar">
         <activity
             android:name="com.voxmic.source.MainActivity"

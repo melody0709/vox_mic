@@ -164,7 +164,7 @@ public class RecordService extends Service {
                 .addAction(createStopAction())
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getText(R.string.notification_waiting))
-                .setSmallIcon(R.drawable.ic_microphone)
+                .setSmallIcon(R.drawable.voxmic_streaming)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build();
         getNotificationManager().notify(NOTIFICATION_ID, notification);
@@ -176,7 +176,7 @@ public class RecordService extends Service {
                 .setColor(ContextCompat.getColor(this, R.color.ic_launcher_background))
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getText(R.string.notification_forwarding))
-                .setSmallIcon(R.drawable.ic_microphone)
+                .setSmallIcon(R.drawable.voxmic_streaming)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build();
         getNotificationManager().notify(NOTIFICATION_ID, notification);
@@ -190,7 +190,7 @@ public class RecordService extends Service {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getText(R.string.notification_starting))
-                .setSmallIcon(R.drawable.ic_microphone)
+                .setSmallIcon(R.drawable.voxmic_streaming)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build();
     }

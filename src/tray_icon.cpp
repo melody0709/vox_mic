@@ -83,7 +83,7 @@ void TrayIcon::setDemandMode(bool on) {
 void TrayIcon::showTooltip(const char* text) {
     if (!m_isCreated) return;
 
-    strcpy_s(m_nid.szInfoTitle, "AudioSource Win");
+    strcpy_s(m_nid.szInfoTitle, "VoxMic");
     strcpy_s(m_nid.szInfo, text);
     m_nid.uFlags = NIF_INFO;
     m_nid.dwInfoFlags = NIIF_INFO;

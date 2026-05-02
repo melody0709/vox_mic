@@ -2,7 +2,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#define REG_KEY "Software\\AudioSourceWin"
+#define REG_KEY "Software\\VoxMic"
 
 Config Config::load() {
     Config cfg;

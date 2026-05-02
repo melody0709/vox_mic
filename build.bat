@@ -61,17 +61,17 @@ cl /O2 /EHsc /std:c++17 ^
     src\dsp\rnnoise\rnnoise_tables.c ^
     src\dsp\rnnoise\rnnoise_data.c ^
     build\voxmic.res ^
-    /Fe:build\audiosource.exe ^
+    /Fe:build\voxmic.exe ^
     /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
 if %ERRORLEVEL% EQU 0 (
     echo.
-    echo Build successful: build\audiosource.exe
+    echo Build successful: build\voxmic.exe
     echo.
     echo Usage:
-    echo   build\audiosource.exe                 Start audio bridge
-    echo   build\audiosource.exe --list-devices  List audio devices
-    echo   build\audiosource.exe --help          Show help
+echo   build\voxmic.exe                 Start audio bridge
+  echo   build\voxmic.exe --list-devices  List audio devices
+  echo   build\voxmic.exe --help          Show help
 ) else (
     echo.
     echo Build FAILED!

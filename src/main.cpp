@@ -244,6 +244,20 @@ void audioBridgeThread() {
 }
 
 int main(int argc, char* argv[]) {
+    // Single instance check (use exe filename as mutex name)
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    std::string exeName = exePath;
+    size_t lastSlash = exeName.find_last_of("\\/");
+    if (lastSlash != std::string::npos) exeName = exeName.substr(lastSlash + 1);
+    std::string mutexName = "Global\\" + exeName;
+    HANDLE hMutex = CreateMutexA(NULL, TRUE, mutexName.c_str());
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        MessageBoxA(NULL, (exeName + " is already running.").c_str(), exeName.c_str(), MB_ICONINFORMATION | MB_OK);
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
+
     g_config = Config::load();
     syncDspAtomsFromConfig();
     g_demandMode.store(g_config.demandMode, std::memory_order_relaxed);
@@ -284,7 +298,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    printf("AudioSource Win (Raw WASAPI) - Android microphone to Windows\n");
+    printf("VoxMic (Raw WASAPI) - Android microphone to Windows\n");
     printf("=============================================================\n\n");
     fflush(stdout);
 
@@ -349,5 +363,8 @@ int main(int argc, char* argv[]) {
 
     printf("Done.\n");
     fflush(stdout);
+
+    ReleaseMutex(hMutex);
+    CloseHandle(hMutex);
     return 0;
 }

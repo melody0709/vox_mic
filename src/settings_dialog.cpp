@@ -16,7 +16,7 @@ extern std::atomic<bool> g_demandMode;
 extern TrayIcon* g_trayIcon;
 extern void syncDspAtomsFromConfig();
 
-#define SETTINGS_CLASS "AudioSourceSettingsClass"
+#define SETTINGS_CLASS "VoxMicSettingsClass"
 #define IDC_COMBO_DEVICE      2001
 #define IDC_HOST_EDIT         2002
 #define IDC_PORT_EDIT         2003
@@ -535,7 +535,7 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
     HWND hWnd = CreateWindowExA(
         WS_EX_DLGMODALFRAME,
         SETTINGS_CLASS,
-        "AudioSource Win - Settings",
+        "VoxMic - Settings",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
         0, 0, 500, 460,
         NULL, NULL, hInstance, pConfig);
