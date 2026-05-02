@@ -8,9 +8,9 @@ public:
     std::string host = "127.0.0.1";
     int port = 27183;
     std::string androidSocket = "audiosource";
-    std::string androidComponent = "fr.dzx.audiosource/.MainActivity";
-    int androidAppPreset = 0;
-    float gain = 1.0f;
+    std::string androidComponent = "com.voxmic.source/.MainActivity";
+    int androidAppPreset = 1;
+    float gain = 1.35f;
     bool nsEnabled = false;
     bool aecEnabled = true;
     bool agcEnabled = false;

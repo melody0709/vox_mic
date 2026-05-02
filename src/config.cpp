@@ -1,144 +1,106 @@
 #include "config.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <cstdio>
+#include <cstdlib>
 
-#define REG_KEY "Software\\VoxMic"
+#define INI_SECTION "VoxMic"
+
+static std::string getIniPath() {
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    std::string path(exePath);
+    size_t pos = path.find_last_of("\\/");
+    if (pos != std::string::npos) {
+        path = path.substr(0, pos + 1);
+    }
+    path += "config.ini";
+    return path;
+}
+
+static std::string readIniString(const char* path, const char* key, const char* def) {
+    char buf[256];
+    GetPrivateProfileStringA(INI_SECTION, key, def, buf, sizeof(buf), path);
+    return buf;
+}
+
+static int readIniInt(const char* path, const char* key, int def) {
+    return (int)GetPrivateProfileIntA(INI_SECTION, key, def, path);
+}
+
+static float readIniFloat(const char* path, const char* key, float def) {
+    char buf[64];
+    char defStr[64];
+    snprintf(defStr, sizeof(defStr), "%.2f", def);
+    GetPrivateProfileStringA(INI_SECTION, key, defStr, buf, sizeof(buf), path);
+    return (float)atof(buf);
+}
+
+static void writeIniString(const char* path, const char* key, const char* val) {
+    WritePrivateProfileStringA(INI_SECTION, key, val, path);
+}
+
+static void writeIniInt(const char* path, const char* key, int val) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", val);
+    WritePrivateProfileStringA(INI_SECTION, key, buf, path);
+}
+
+static void writeIniFloat(const char* path, const char* key, float val) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.2f", val);
+    WritePrivateProfileStringA(INI_SECTION, key, buf, path);
+}
 
 Config Config::load() {
     Config cfg;
-    HKEY hKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        char buffer[256];
-        DWORD size = sizeof(buffer);
-        if (RegQueryValueExA(hKey, "Serial", NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-            cfg.serial = buffer;
-        }
-        size = sizeof(buffer);
-        if (RegQueryValueExA(hKey, "Host", NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-            cfg.host = buffer;
-        }
-        DWORD portVal;
-        size = sizeof(portVal);
-        if (RegQueryValueExA(hKey, "Port", NULL, NULL, (LPBYTE)&portVal, &size) == ERROR_SUCCESS) {
-            cfg.port = (int)portVal;
-        }
-        size = sizeof(buffer);
-        if (RegQueryValueExA(hKey, "AndroidSocket", NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-            cfg.androidSocket = buffer;
-        }
-        size = sizeof(buffer);
-        if (RegQueryValueExA(hKey, "AndroidComponent", NULL, NULL, (LPBYTE)buffer, &size) == ERROR_SUCCESS) {
-            cfg.androidComponent = buffer;
-        }
-        DWORD presetVal;
-        size = sizeof(presetVal);
-        if (RegQueryValueExA(hKey, "AndroidAppPreset", NULL, NULL, (LPBYTE)&presetVal, &size) == ERROR_SUCCESS) {
-            cfg.androidAppPreset = (int)presetVal;
-        }
-        DWORD gainRaw;
-        size = sizeof(gainRaw);
-        if (RegQueryValueExA(hKey, "GainPercent", NULL, NULL, (LPBYTE)&gainRaw, &size) == ERROR_SUCCESS) {
-            cfg.gain = (float)gainRaw / 100.0f;
-            if (cfg.gain < 0.25f) cfg.gain = 0.25f;
-            if (cfg.gain > 4.0f) cfg.gain = 4.0f;
-        }
-        DWORD flagVal;
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "NsEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.nsEnabled = (flagVal != 0);
-        }
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "AecEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.aecEnabled = (flagVal != 0);
-        }
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "AgcEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.agcEnabled = (flagVal != 0);
-        }
+    std::string path = getIniPath();
 
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "EqEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.eqEnabled = (flagVal != 0);
-        }
-        DWORD presRaw;
-        size = sizeof(presRaw);
-        if (RegQueryValueExA(hKey, "EqPresence", NULL, NULL, (LPBYTE)&presRaw, &size) == ERROR_SUCCESS) {
-            cfg.eqPresence = (float)presRaw / 10.0f;
-            if (cfg.eqPresence < 0.0f) cfg.eqPresence = 0.0f;
-            if (cfg.eqPresence > 6.0f) cfg.eqPresence = 6.0f;
-        }
-        DWORD bassRaw;
-        size = sizeof(bassRaw);
-        if (RegQueryValueExA(hKey, "EqBassCut", NULL, NULL, (LPBYTE)&bassRaw, &size) == ERROR_SUCCESS) {
-            cfg.eqBassCut = -(float)bassRaw / 10.0f;
-            if (cfg.eqBassCut < -6.0f) cfg.eqBassCut = -6.0f;
-            if (cfg.eqBassCut > 0.0f) cfg.eqBassCut = 0.0f;
-        }
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "CompressorEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.compressorEnabled = (flagVal != 0);
-        }
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "NrEnabled", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.nrEnabled = (flagVal != 0);
-        }
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "DebugConsole", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.debugConsole = (flagVal != 0);
-        }
-        size = sizeof(flagVal);
-        if (RegQueryValueExA(hKey, "DemandMode", NULL, NULL, (LPBYTE)&flagVal, &size) == ERROR_SUCCESS) {
-            cfg.demandMode = (flagVal != 0);
-        }
+    cfg.serial = readIniString(path.c_str(), "Serial", "");
+    cfg.host = readIniString(path.c_str(), "Host", "127.0.0.1");
+    cfg.port = readIniInt(path.c_str(), "Port", 27183);
+    cfg.androidSocket = readIniString(path.c_str(), "AndroidSocket", "audiosource");
+    cfg.androidComponent = readIniString(path.c_str(), "AndroidComponent", "com.voxmic.source/.MainActivity");
+    cfg.androidAppPreset = readIniInt(path.c_str(), "AndroidAppPreset", 1);
+    cfg.gain = readIniFloat(path.c_str(), "Gain", 1.35f);
+    if (cfg.gain < 0.25f) cfg.gain = 0.25f;
+    if (cfg.gain > 4.0f) cfg.gain = 4.0f;
+    cfg.nsEnabled = readIniInt(path.c_str(), "NsEnabled", 0) != 0;
+    cfg.aecEnabled = readIniInt(path.c_str(), "AecEnabled", 1) != 0;
+    cfg.agcEnabled = readIniInt(path.c_str(), "AgcEnabled", 0) != 0;
+    cfg.eqEnabled = readIniInt(path.c_str(), "EqEnabled", 1) != 0;
+    cfg.eqPresence = readIniFloat(path.c_str(), "EqPresence", 3.0f);
+    if (cfg.eqPresence < 0.0f) cfg.eqPresence = 0.0f;
+    if (cfg.eqPresence > 6.0f) cfg.eqPresence = 6.0f;
+    cfg.eqBassCut = readIniFloat(path.c_str(), "EqBassCut", -3.0f);
+    if (cfg.eqBassCut < -6.0f) cfg.eqBassCut = -6.0f;
+    if (cfg.eqBassCut > 0.0f) cfg.eqBassCut = 0.0f;
+    cfg.compressorEnabled = readIniInt(path.c_str(), "CompressorEnabled", 1) != 0;
+    cfg.nrEnabled = readIniInt(path.c_str(), "NrEnabled", 1) != 0;
+    cfg.debugConsole = readIniInt(path.c_str(), "DebugConsole", 1) != 0;
+    cfg.demandMode = readIniInt(path.c_str(), "DemandMode", 1) != 0;
 
-        RegCloseKey(hKey);
-    }
     return cfg;
 }
 
 void Config::save() const {
-    HKEY hKey;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, REG_KEY, 0, NULL,
-        0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExA(hKey, "Serial", 0, REG_SZ,
-            (const BYTE*)serial.c_str(), (DWORD)serial.size() + 1);
-        RegSetValueExA(hKey, "Host", 0, REG_SZ,
-            (const BYTE*)host.c_str(), (DWORD)host.size() + 1);
-        DWORD portVal = (DWORD)port;
-        RegSetValueExA(hKey, "Port", 0, REG_DWORD,
-            (const BYTE*)&portVal, sizeof(portVal));
-        RegSetValueExA(hKey, "AndroidSocket", 0, REG_SZ,
-            (const BYTE*)androidSocket.c_str(), (DWORD)androidSocket.size() + 1);
-        RegSetValueExA(hKey, "AndroidComponent", 0, REG_SZ,
-            (const BYTE*)androidComponent.c_str(), (DWORD)androidComponent.size() + 1);
-        DWORD presetVal = (DWORD)androidAppPreset;
-        RegSetValueExA(hKey, "AndroidAppPreset", 0, REG_DWORD,
-            (const BYTE*)&presetVal, sizeof(presetVal));
-        DWORD gainRaw = (DWORD)(gain * 100.0f);
-        RegSetValueExA(hKey, "GainPercent", 0, REG_DWORD,
-            (const BYTE*)&gainRaw, sizeof(gainRaw));
-        DWORD nsVal = nsEnabled ? 1 : 0;
-        RegSetValueExA(hKey, "NsEnabled", 0, REG_DWORD, (const BYTE*)&nsVal, sizeof(nsVal));
-        DWORD aecVal = aecEnabled ? 1 : 0;
-        RegSetValueExA(hKey, "AecEnabled", 0, REG_DWORD, (const BYTE*)&aecVal, sizeof(aecVal));
-        DWORD agcVal = agcEnabled ? 1 : 0;
-        RegSetValueExA(hKey, "AgcEnabled", 0, REG_DWORD, (const BYTE*)&agcVal, sizeof(agcVal));
+    std::string path = getIniPath();
 
-        DWORD eqVal = eqEnabled ? 1 : 0;
-        RegSetValueExA(hKey, "EqEnabled", 0, REG_DWORD, (const BYTE*)&eqVal, sizeof(eqVal));
-        DWORD presRaw = (DWORD)(eqPresence * 10.0f);
-        RegSetValueExA(hKey, "EqPresence", 0, REG_DWORD, (const BYTE*)&presRaw, sizeof(presRaw));
-        DWORD bassRaw = (DWORD)(-eqBassCut * 10.0f);
-        RegSetValueExA(hKey, "EqBassCut", 0, REG_DWORD, (const BYTE*)&bassRaw, sizeof(bassRaw));
-        DWORD compVal = compressorEnabled ? 1 : 0;
-        RegSetValueExA(hKey, "CompressorEnabled", 0, REG_DWORD, (const BYTE*)&compVal, sizeof(compVal));
-        DWORD nrVal = nrEnabled ? 1 : 0;
-        RegSetValueExA(hKey, "NrEnabled", 0, REG_DWORD, (const BYTE*)&nrVal, sizeof(nrVal));
-        DWORD debugVal = debugConsole ? 1 : 0;
-        RegSetValueExA(hKey, "DebugConsole", 0, REG_DWORD, (const BYTE*)&debugVal, sizeof(debugVal));
-        DWORD demandVal = demandMode ? 1 : 0;
-        RegSetValueExA(hKey, "DemandMode", 0, REG_DWORD, (const BYTE*)&demandVal, sizeof(demandVal));
-
-        RegCloseKey(hKey);
-    }
+    writeIniString(path.c_str(), "Serial", serial.c_str());
+    writeIniString(path.c_str(), "Host", host.c_str());
+    writeIniInt(path.c_str(), "Port", port);
+    writeIniString(path.c_str(), "AndroidSocket", androidSocket.c_str());
+    writeIniString(path.c_str(), "AndroidComponent", androidComponent.c_str());
+    writeIniInt(path.c_str(), "AndroidAppPreset", androidAppPreset);
+    writeIniFloat(path.c_str(), "Gain", gain);
+    writeIniInt(path.c_str(), "NsEnabled", nsEnabled ? 1 : 0);
+    writeIniInt(path.c_str(), "AecEnabled", aecEnabled ? 1 : 0);
+    writeIniInt(path.c_str(), "AgcEnabled", agcEnabled ? 1 : 0);
+    writeIniInt(path.c_str(), "EqEnabled", eqEnabled ? 1 : 0);
+    writeIniFloat(path.c_str(), "EqPresence", eqPresence);
+    writeIniFloat(path.c_str(), "EqBassCut", eqBassCut);
+    writeIniInt(path.c_str(), "CompressorEnabled", compressorEnabled ? 1 : 0);
+    writeIniInt(path.c_str(), "NrEnabled", nrEnabled ? 1 : 0);
+    writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0);
+    writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0);
 }
