@@ -44,9 +44,9 @@ public:
                 m_bq[0].setHPF(80.0f, 0.707f, sampleRate);
                 m_bq[1].setLowShelf(120.0f, bassCut, 0.7f, sampleRate);
                 m_bq[2].setPeak(250.0f, bassCut * 0.5f, 0.6f, sampleRate);
-                m_bq[3].setPeak(2500.0f, presence, 0.5f, sampleRate);
+                m_bq[3].setPeak(2500.0f, presence, 0.8f, sampleRate);
                 m_bq[4].setPeak(3200.0f, presence * 0.6f, 0.7f, sampleRate);
-                m_bq[5].setHighShelf(8000.0f, 1.5f, 0.7f, sampleRate);
+                m_bq[5].setHighShelf(8000.0f, presence * 0.25f, 0.7f, sampleRate);
             }
             for (int i = 0; i < 6; i++) m_bq[i].reset();
         }

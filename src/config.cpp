@@ -71,7 +71,7 @@ Config Config::load() {
     cfg.eqEnabled = readIniInt(path.c_str(), "EqEnabled", 1) != 0;
     cfg.eqPresence = readIniFloat(path.c_str(), "EqPresence", 3.0f);
     if (cfg.eqPresence < 0.0f) cfg.eqPresence = 0.0f;
-    if (cfg.eqPresence > 6.0f) cfg.eqPresence = 6.0f;
+    if (cfg.eqPresence > 8.0f) cfg.eqPresence = 8.0f;
     cfg.eqBassCut = readIniFloat(path.c_str(), "EqBassCut", -3.0f);
     if (cfg.eqBassCut < -6.0f) cfg.eqBassCut = -6.0f;
     if (cfg.eqBassCut > 0.0f) cfg.eqBassCut = 0.0f;

@@ -215,7 +215,7 @@ static void saveUiToConfig(HWND hWnd, Config* cfg) {
     int presPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
     cfg->eqPresence = (float)presPos / 10.0f;
     if (cfg->eqPresence < 0.0f) cfg->eqPresence = 0.0f;
-    if (cfg->eqPresence > 6.0f) cfg->eqPresence = 6.0f;
+    if (cfg->eqPresence > 8.0f) cfg->eqPresence = 8.0f;
     int bassPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
     cfg->eqBassCut = -(float)bassPos / 10.0f;
     if (cfg->eqBassCut < -6.0f) cfg->eqBassCut = -6.0f;
@@ -384,12 +384,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         HWND hPresTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
             WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
             ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_PRES, hInst, NULL));
-        SendMessageA(hPresTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
+        SendMessageA(hPresTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 80));
         SendMessageA(hPresTrackbar, TBM_SETTICFREQ, 10, 0);
 
         yBase += 27;
 
-        HWND hPresHint = addDsp(CreateWindowExA(0, "STATIC", "Boost vocal presence in the 2-3kHz range",
+        HWND hPresHint = addDsp(CreateWindowExA(0, "STATIC", "Boost vocal presence and articulation (1.7-3.7kHz)",
             WS_CHILD,
             xMargin + 20, yBase, 330, 16, hWnd, NULL, hInst, NULL));
         pData->hintControls.push_back(hPresHint);
