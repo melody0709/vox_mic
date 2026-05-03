@@ -12,6 +12,7 @@
 #define ID_MENU_START        1001
 #define ID_MENU_STOP         1002
 #define ID_MENU_DEMAND_MODE  1005
+#define ID_MENU_ALWAYS_HOT   1006
 #define ID_MENU_SETTINGS     1003
 #define ID_MENU_EXIT         1004
 
@@ -26,6 +27,7 @@ public:
     void showMenu(HWND hWnd);
     void showTooltip(const char* text);
     void setDemandMode(bool on);
+    void setAlwaysHot(bool on);
 
     std::function<void()> onStart;
     std::function<void()> onStop;

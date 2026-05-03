@@ -30,6 +30,7 @@ std::atomic<bool> g_nrEnabled{true};
 std::atomic<bool> g_micRequested{false};
 static std::atomic<bool> g_micStreaming{false};
 std::atomic<bool> g_demandMode{true};
+std::atomic<bool> g_alwaysHot{true};
 static std::atomic<uint64_t> g_micOnTick{0};
 static MicUsageMonitor g_micMonitor;
 static std::thread g_monitorThread;
@@ -137,12 +138,24 @@ void audioBridgeThread() {
             continue;
         }
 
+        if (!g_alwaysHot.load(std::memory_order_relaxed) &&
+            g_demandMode.load(std::memory_order_relaxed) &&
+            !g_micRequested.load(std::memory_order_relaxed)) {
+            Sleep(200);
+            continue;
+        }
+
         if (!socketClient.isConnected()) {
+            LARGE_INTEGER qpcFreq, t0, t1;
+            QueryPerformanceFrequency(&qpcFreq);
+            QueryPerformanceCounter(&t0);
             if (!socketClient.connect(host, port)) {
                 Sleep(200);
                 continue;
             }
-            printf("Socket connected\n");
+            QueryPerformanceCounter(&t1);
+            double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)qpcFreq.QuadPart;
+            printf("Socket connected (%.2fms)\n", ms);
             fflush(stdout);
             g_streaming.store(true);
             g_micStreaming.store(true);
@@ -194,9 +207,17 @@ void audioBridgeThread() {
                 if (g_trayIcon && !wasIdle) g_trayIcon->updateIcon(false, true);
                 idleCount++;
                 wasIdle = true;
-                if (idleCount > 50) {
+                if (idleCount % 50 == 0) {
                     g_wasapiOutput->getRingBuffer()->reset();
-                    idleCount = 0;
+                }
+                if (!g_alwaysHot.load(std::memory_order_relaxed) && idleCount > 500) {
+                    printf("Idle 5s, disconnecting socket\n");
+                    fflush(stdout);
+                    socketClient.disconnect();
+                    g_streaming.store(false);
+                    g_micStreaming.store(false);
+                    if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+                    break;
                 }
                 continue;
             }
@@ -261,6 +282,7 @@ int main(int argc, char* argv[]) {
     g_config = Config::load();
     syncDspAtomsFromConfig();
     g_demandMode.store(g_config.demandMode, std::memory_order_relaxed);
+    g_alwaysHot.store(g_config.alwaysHot, std::memory_order_relaxed);
 
     bool listDevices = false;
     bool showHelp = false;
@@ -328,6 +350,7 @@ int main(int argc, char* argv[]) {
     g_trayIcon = &trayIcon;
     trayIcon.create(hInstance, hWnd);
     trayIcon.setDemandMode(g_config.demandMode);
+    trayIcon.setAlwaysHot(g_config.alwaysHot);
 
     SetTimer(hWnd, 1, STATS_INTERVAL_MS, statsTimerProc);
 

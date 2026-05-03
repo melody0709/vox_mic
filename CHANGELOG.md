@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.5.0 (2026-05-03)
+
+### Phase 9: Socket 按需连接 — Android 空闲省电
+
+| 特性 | 说明 |
+|------|------|
+| **Always Hot 开关** | 右键托盘菜单勾选控制，持久化到注册表，**默认 OFF** |
+| **空闲断连** | Always Hot OFF 时，空闲 5s 后主动断连 socket → Android `AudioRecord` 停止 → 零耗电 |
+| **按需重连** | 外层循环轮询 `g_micRequested` (Sleep 200ms)，有需求时 `connect()` **~0.3-0.8ms (QPC 实测)** |
+| **冷启动延迟** | ~200ms (主要为 Sleep 200ms 轮询，socket connect 可忽略) |
+| **Android 端** | 无需改动：`accept → startRecording → stop → accept` 循环原生匹配 |
+
+#### 实测数据
+
+| 指标 | 值 |
+|------|-----|
+| socket 重连耗时 | 0.33-0.81ms (QPC, 远低于预估 ~200ms) |
+| 冷启动延迟 | ~200ms (Sleep 200ms 轮询为主) |
+| 空闲 CPU | 0-0.1% (不变) |
+
+#### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/main.cpp` | 新增 `g_alwaysHot` 原子变量；外层循环空闲等待；内层循环 idle 500 blocks 断连；QPC socket connect 计时 |
+| `src/tray_icon.h/cpp` | 新增 `ID_MENU_ALWAYS_HOT` 菜单项 + `setAlwaysHot()` |
+| `src/settings_dialog.cpp` | Always Hot 菜单切换逻辑 + 注册表保存 |
+| `src/config.h/cpp` | 新增 `alwaysHot` 字段（20 字段），默认 false，注册表持久化 |
+
+---
+
 ## v0.4.2 (2026-05-02)
 
 ### Phase 8: CPU 优化 + 事件驱动 Monitor

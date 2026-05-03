@@ -79,6 +79,7 @@ Config Config::load() {
     cfg.nrEnabled = readIniInt(path.c_str(), "NrEnabled", 1) != 0;
     cfg.debugConsole = readIniInt(path.c_str(), "DebugConsole", 1) != 0;
     cfg.demandMode = readIniInt(path.c_str(), "DemandMode", 1) != 0;
+    cfg.alwaysHot = readIniInt(path.c_str(), "AlwaysHot", 0) != 0;
 
     return cfg;
 }
@@ -103,4 +104,5 @@ void Config::save() const {
     writeIniInt(path.c_str(), "NrEnabled", nrEnabled ? 1 : 0);
     writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0);
     writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0);
+    writeIniInt(path.c_str(), "AlwaysHot", alwaysHot ? 1 : 0);
 }

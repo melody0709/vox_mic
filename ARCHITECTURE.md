@@ -1,4 +1,4 @@
-# 架构说明 — v0.4.2
+# 架构说明 — v0.5.0
 
 ## 数据流
 
@@ -13,7 +13,7 @@ audiosource.exe
     ├── MicUsageMonitor 线程 (事件驱动: IAudioSessionNotification + IAudioSessionEvents)
     │       └→ g_micRequested (atomic<bool>)
     │
-    ├── Socket 接收线程 (Always Hot, 永不主动断连)
+    ├── Socket 接收线程 (按需连接: idl 5s 断连, connect ~0.4ms 实测)
     │       │   recvExact(960) → g_micRequested ? push : discard
     │       │
     │   SPSC 无锁环形缓冲区 (128 块 × 960 字节)
@@ -48,7 +48,7 @@ audiosource.exe
 | `socket_client.h/cpp` | Winsock2 TCP 客户端 (含 waitForData) |
 | `adb_control.h/cpp` | ADB 命令、设备检测、App 启动、端口转发 (**CreateProcess + CREATE_NO_WINDOW**，无闪烁) |
 | `tray_icon.h/cpp` | 系统托盘 + 右键菜单 (含灰度版本号) |
-| `config.h/cpp` | 注册表持久化 (**18 字段**) |
+| `config.h/cpp` | 注册表持久化 (**20 字段**) |
 | `settings_dialog.h/cpp` | **主窗口** GUI (设备/网络/App/音效/DSP/Debug，非模态持久窗口) |
 | **`mic_usage_monitor.h/cpp`** | Phase 3+8: 事件驱动 (IAudioSessionNotification + IAudioSessionEvents) |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
@@ -102,6 +102,7 @@ audiosource.exe
 | 检测延迟 | 即时 (COM 回调) | `g_micOnTick` | monitor → bridge |
 | Demand Mode 开关 | 右键托盘，持久化到注册表 | `g_demandMode` | tray → monitor |
 | 空闲 ring buffer reset | 5s (50 × 100ms) | — | bridge |
+| Socket 空闲断连 | 5s (500 blocks) Always Hot OFF | `g_alwaysHot` | bridge |
 | Socket stall 断连 | 9s (90 × 100ms) | — | bridge |
 
 ## 线程模型
@@ -109,7 +110,7 @@ audiosource.exe
 ```
 main thread:         消息泵 + SetTimer(stats, 5s)
 monitor thread:      Sleep(1000) 仅保持 COM 公寓存活 (Phase 8 事件驱动)
-bridge thread:       ADB 一次性初始化 (CreateProcess NO_WINDOW) + Socket Always Hot → g_micRequested 门控 → ring buffer push/discard
+bridge thread:       ADB 一次性初始化 (CreateProcess NO_WINDOW) + Socket 按需连接 (idle 5s 断连, connect ~0.4ms) → g_micRequested 门控 → ring buffer push/discard
 render thread:       事件驱动 ring buffer pop → int16→float → DspPipeline (47µs/块) → WASAPI write
 ```
 

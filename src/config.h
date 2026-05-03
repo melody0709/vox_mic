@@ -21,6 +21,7 @@ public:
     bool nrEnabled = true;
     bool debugConsole = true;
     bool demandMode = true;
+    bool alwaysHot = false;
 
     static Config load();
     void save() const;

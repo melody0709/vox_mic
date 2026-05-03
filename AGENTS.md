@@ -1,4 +1,4 @@
-# AGENTS.md — v0.4.2
+# AGENTS.md — v0.5.0
 
 ## 项目概述
 
@@ -20,6 +20,7 @@
 │   │   └── plan_raw_wasapi.md   #   初始 Raw WASAPI 计划
 │   └── ongoing/                 # 进行中的 plan (新建 plan 放这里)
 │       └── plan_optimize.md     #   整体优化计划 (Phase 4/6C 待实施)
+│       └── plan_ondemand_socket.md  # Phase 9 Socket 按需连接 (当前活跃)
 ```
 
 ### Plan 管理规则
@@ -63,11 +64,12 @@ build\audiosource.exe
 | 左键托盘图标 | 弹出设置窗口 |
 | 关闭设置窗口 [X] | 隐藏到托盘（不退出） |
 | 右键托盘菜单 → Demand Mode | 切换按需激活开/关（持久化到注册表） |
+| 右键托盘菜单 → Always Hot | 切换 socket 常连接开/关（持久化到注册表） |
 | 右键托盘菜单 → Exit | 彻底退出 |
 
 在 Windows 应用中选择 **CABLE Output** 作为麦克风。
 
-## v0.4.2 关键参数
+## v0.5.0 关键参数
 
 ### 传输参数
 
@@ -91,10 +93,11 @@ build\audiosource.exe
 | 检测延迟 | **即时** (COM 回调) | 事件驱动，无需轮询 |
 | Demand Mode 开关 | 右键托盘菜单，持久化到注册表 | `tray_icon.cpp`, `config.h/cpp` |
 | 空闲 CPU | **0-0.1%** | 事件驱动，零 COM 调用 |
-| 空闲 ring buffer reset | 5s (50 × 100ms) | `main.cpp:170-173` |
-| Socket stall 断连阈值 | 9s (90 × 100ms) | `main.cpp:137` |
-| Bridge 重连延迟 | ~200ms (仅 socket, 不走 ADB) | `main.cpp` |
-| 初始 ADB 启动 | 一次性 (~1.5s) | `main.cpp` |
+| 空闲 ring buffer reset | 每 50 blocks (0.5s) | `main.cpp` |
+| Socket stall 断连阈值 | 9s (90 × 100ms) | `main.cpp` |
+| Socket 空闲断连阈值 | 5s (500 blocks) Always Hot OFF 时 | `main.cpp` |
+| Bridge 重连延迟 | ~0.3-0.8ms (实测 QPC) | `main.cpp` |
+| 冷启动延迟 | ~200ms (Sleep 200ms 轮询外循环) | `main.cpp` |
 
 ### DSP 管线
 
@@ -106,7 +109,7 @@ build\audiosource.exe
 | Compressor | -18dBFS, 3:1, 5/50ms | `g_compressorEnabled` | `dsp/pipeline.h` |
 | Limiter | -1dBFS | 始终 | `dsp/pipeline.h` |
 
-### 配置字段 (19)
+### 配置字段 (20)
 
 | 分类 | 字段 | 类型 | 默认 |
 |------|------|------|------|
@@ -118,6 +121,7 @@ build\audiosource.exe
 | DSP | eqPresence / eqBassCut | float (0~6 / -6~0) | 3.0 / -3.0 |
 | 界面 | debugConsole | bool | true |
 | 按需 | demandMode | bool | true |
+| 按需 | alwaysHot | bool | false |
 
 ### 全局原子变量
 
@@ -133,6 +137,7 @@ build\audiosource.exe
 | `g_micStreaming` | 当前是否在推流 (Phase 3) | bridge → tray |
 | `g_micOnTick` | 检测延迟时间戳 (Phase 3) | monitor → bridge |
 | `g_demandMode` | Demand Mode 开关 (Phase 8) | tray → monitor/bridge |
+| `g_alwaysHot` | Always Hot 开关 (Phase 9) | tray → bridge |
 
 `syncDspAtomsFromConfig()` 在 `main.cpp`，启动和每次重连时调用。
 
@@ -204,6 +209,15 @@ render thread:       ring buffer pop → int16→float → DspPipeline → WASAP
 - **Demand Mode 开关**: 右键托盘菜单，持久化到注册表，用户可对比观察 CPU
 - **DSP 开销实测**: 仅 ~0.1%（远低于 Phase 3 设计文档预估的 ~1.65%）
 - **空闲 CPU**: 0-0.1%（从 v0.4.1 的 0.2-0.4% 优化）
+
+## Phase 9 — Socket 按需连接 (已完成 v0.4.3)
+
+- **Always Hot 开关**: 右键托盘菜单勾选控制，持久化到注册表
+- **OFF (默认)**: 空闲 5s 后主动断连 socket → Android `accept()` 等待 → AudioRecord 停止 → 零耗电
+- **ON**: 保持旧行为 — socket 永不主动断连，Android 持续录音
+- **按需重连**: bridge 外层循环轮询 `g_micRequested` (Sleep 200ms)，有需求时 `connect()` (~0.4ms 实测)
+- **冷启动延迟**: ~200ms (200ms 轮询为主，socket connect 仅 ~0.4ms 实测)
+- **不改 Android 端**: `RecordThread.accept → startRecording → stop → accept` 循环已完美匹配
 
 ## Next: DeepFilterNet3 (Phase 6C)
 

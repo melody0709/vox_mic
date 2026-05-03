@@ -25,9 +25,10 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_START, "Start Bridge");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_STOP, "Stop Bridge");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_DEMAND_MODE, "Demand Mode");
+    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_ALWAYS_HOT, "Always Hot");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(m_hMenu, MF_GRAYED, 0, "v0.4.2");
+    AppendMenuA(m_hMenu, MF_GRAYED, 0, "v0.5.0");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_EXIT, "Exit");
 
@@ -77,6 +78,12 @@ void TrayIcon::showMenu(HWND hWnd) {
 void TrayIcon::setDemandMode(bool on) {
     if (!m_isCreated || !m_hMenu) return;
     CheckMenuItem(m_hMenu, ID_MENU_DEMAND_MODE,
+        on ? MF_CHECKED : MF_UNCHECKED);
+}
+
+void TrayIcon::setAlwaysHot(bool on) {
+    if (!m_isCreated || !m_hMenu) return;
+    CheckMenuItem(m_hMenu, ID_MENU_ALWAYS_HOT,
         on ? MF_CHECKED : MF_UNCHECKED);
 }
 

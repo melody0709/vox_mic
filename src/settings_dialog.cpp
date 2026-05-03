@@ -13,6 +13,7 @@ extern Config g_config;
 extern std::atomic<bool> g_running;
 extern std::atomic<bool> g_bridgeActive;
 extern std::atomic<bool> g_demandMode;
+extern std::atomic<bool> g_alwaysHot;
 extern TrayIcon* g_trayIcon;
 extern void syncDspAtomsFromConfig();
 
@@ -482,6 +483,19 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 printf("[Demand] Mode ON (mic monitor active)\n");
             else
                 printf("[Demand] Mode OFF (always stream)\n");
+            fflush(stdout);
+            break;
+        }
+        case ID_MENU_ALWAYS_HOT: {
+            bool newVal = !g_alwaysHot.load();
+            g_alwaysHot.store(newVal);
+            if (g_trayIcon) g_trayIcon->setAlwaysHot(newVal);
+            g_config.alwaysHot = newVal;
+            g_config.save();
+            if (newVal)
+                printf("[AlwaysHot] ON (socket always connected)\n");
+            else
+                printf("[AlwaysHot] OFF (socket disconnect on idle)\n");
             fflush(stdout);
             break;
         }
