@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
+#include <endpointvolume.h>
 #include <atomic>
 #include <vector>
 #include <mutex>
@@ -17,6 +18,7 @@ public:
 
     bool init();
     void shutdown();
+    float getCapturePeak();
 
     // IUnknown
     STDMETHOD(QueryInterface)(REFIID riid, void** ppv) override;
@@ -43,6 +45,7 @@ private:
     IAudioSessionManager2* m_pSessionManager{nullptr};
     IMMDevice* m_pDevice{nullptr};
     IMMDeviceEnumerator* m_pEnumerator{nullptr};
+    IAudioMeterInformation* m_pMeter{nullptr};
     bool m_initialized{false};
     std::atomic<bool> m_stopping{false};
 

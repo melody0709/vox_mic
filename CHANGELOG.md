@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.5.1 (2026-05-03)
+
+### Phase 10: 按需激活检测修复 — Sound Recorder 停止后不 idle
+
+#### Bug 修复
+
+| Bug | 描述 | 修复 |
+|-----|------|------|
+| **Bug 1** | Monitor 监听默认采集设备（内置麦克风），而非 CABLE Output | 改用 `EnumAudioEndpoints(eCapture)` 按名称 "CABLE Output" 匹配 |
+| **Bug 2** | Sound Recorder (UWP) 停止/关闭后不释放 `IAudioClient`，`AudioSessionState` 保持 Active | 新增 `IAudioMeterInformation` 静音兜底，连续 3s 峰值=0 则强制 idle |
+
+#### 三层检测架构
+
+| 层次 | 机制 | 触发方式 | 延迟 | CPU 开销 |
+|------|------|---------|------|---------|
+| 1 | `OnStateChanged(Active/Inactive)` | COM 事件回调 | 即时 | 零 |
+| 2 | `renderStallScore` | render event 超时 (3×2000ms) | ~6s | 零 (已有) |
+| 3 | `IAudioMeterInformation::GetPeakValue()` | monitor 线程 (仅活跃态) | ~3s | 1次 COM/秒 |
+
+**idle 态**：`g_micRequested == false` 时 monitor 线程仅 `Sleep(1000)`，零 COM 调用，零 CPU。
+
+#### 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/mic_usage_monitor.h` | 新增 `IAudioMeterInformation* m_pMeter` + `getCapturePeak()` |
+| `src/mic_usage_monitor.cpp` | `init()` 枚举 eCapture 找 CABLE Output + 激活 IAudioMeterInformation；`shutdown()` 释放 |
+| `src/wasapi_output.h` | 新增 `std::atomic<int> renderStallScore` |
+| `src/wasapi_output.cpp` | `renderThread()` 追踪 `WaitForSingleObject` 超时计数 |
+| `src/main.cpp` | `micMonitorThread()` 活跃态 meter 轮询 + 静音强制 idle；bridge 线程 `effectiveActive` 逻辑整合 |
+
+---
+
 ## v0.5.0 (2026-05-03)
 
 ### Phase 9: Socket 按需连接 — Android 空闲省电

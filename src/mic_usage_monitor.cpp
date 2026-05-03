@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
+#include <functiondiscoverykeys_devpkey.h>
 
 #pragma comment(lib, "ole32.lib")
 
@@ -106,16 +107,61 @@ bool MicUsageMonitor::init() {
     }
     m_pEnumerator = pEnumerator;
 
-    IMMDevice* pDevice = nullptr;
-    hr = pEnumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &pDevice);
+    IMMDeviceCollection* pCaptureCollection = nullptr;
+    hr = pEnumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &pCaptureCollection);
     if (FAILED(hr)) {
-        printf("MicUsageMonitor: GetDefaultAudioEndpoint failed 0x%08lx\n", hr);
+        printf("MicUsageMonitor: EnumAudioEndpoints(capture) failed 0x%08lx\n", hr);
         pEnumerator->Release();
         m_pEnumerator = nullptr;
         CoUninitialize();
         return false;
     }
+
+    UINT capCount = 0;
+    pCaptureCollection->GetCount(&capCount);
+    IMMDevice* pDevice = nullptr;
+    for (UINT i = 0; i < capCount; i++) {
+        IMMDevice* pDev = nullptr;
+        if (FAILED(pCaptureCollection->Item(i, &pDev))) continue;
+        IPropertyStore* pProps = nullptr;
+        if (SUCCEEDED(pDev->OpenPropertyStore(STGM_READ, &pProps))) {
+            PROPVARIANT varName;
+            PropVariantInit(&varName);
+            if (SUCCEEDED(pProps->GetValue(PKEY_Device_FriendlyName, &varName))
+                && varName.vt == VT_LPWSTR
+                && wcsstr(varName.pwszVal, L"CABLE Output") != nullptr) {
+                printf("MicUsageMonitor: found CABLE Output capture: %ls\n", varName.pwszVal);
+                pDevice = pDev;
+            }
+            PropVariantClear(&varName);
+            pProps->Release();
+        }
+        if (pDevice) break;
+        pDev->Release();
+    }
+    pCaptureCollection->Release();
+
+    if (!pDevice) {
+        printf("MicUsageMonitor: CABLE Output capture endpoint not found, falling back to default\n");
+        hr = pEnumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &pDevice);
+        if (FAILED(hr)) {
+            printf("MicUsageMonitor: GetDefaultAudioEndpoint failed 0x%08lx\n", hr);
+            pEnumerator->Release();
+            m_pEnumerator = nullptr;
+            CoUninitialize();
+            return false;
+        }
+    }
     m_pDevice = pDevice;
+
+    IAudioMeterInformation* pMeter = nullptr;
+    hr = pDevice->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, NULL, (void**)&pMeter);
+    if (FAILED(hr)) {
+        printf("MicUsageMonitor: Activate IAudioMeterInformation failed 0x%08lx\n", hr);
+    } else {
+        m_pMeter = pMeter;
+        printf("MicUsageMonitor: IAudioMeterInformation activated\n");
+    }
 
     IAudioSessionManager2* pSessionManager = nullptr;
     hr = pDevice->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, NULL, (void**)&pSessionManager);
@@ -153,6 +199,13 @@ bool MicUsageMonitor::init() {
     return true;
 }
 
+float MicUsageMonitor::getCapturePeak() {
+    if (!m_pMeter) return 0.0f;
+    float peak = 0.0f;
+    HRESULT hr = m_pMeter->GetPeakValue(&peak);
+    return SUCCEEDED(hr) ? peak : 0.0f;
+}
+
 void MicUsageMonitor::shutdown() {
     m_stopping.store(true, std::memory_order_relaxed);
 
@@ -163,6 +216,10 @@ void MicUsageMonitor::shutdown() {
 
     unregisterAllSessions();
 
+    if (m_pMeter) {
+        m_pMeter->Release();
+        m_pMeter = nullptr;
+    }
     if (m_pSessionManager) {
         m_pSessionManager->Release();
         m_pSessionManager = nullptr;

@@ -32,6 +32,7 @@ public:
     std::atomic<int> droppedBlocks{0};
     std::atomic<double> procUsEma{0};
     std::atomic<double> estLatencyMs{0};
+    std::atomic<int> renderStallScore{0};
 
 private:
     bool initCOM();

@@ -1,5 +1,6 @@
 #include "tray_icon.h"
 #include "resource.h"
+#include "version.h"
 #include <cstdio>
 
 #pragma comment(lib, "shell32.lib")
@@ -28,7 +29,7 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_ALWAYS_HOT, "Always Hot");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings");
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuA(m_hMenu, MF_GRAYED, 0, "v0.5.0");
+    AppendMenuA(m_hMenu, MF_GRAYED, 0, APP_VERSION);
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_EXIT, "Exit");
 

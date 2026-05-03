@@ -174,9 +174,12 @@ void WASAPIOutput::renderThread() {
     while (m_running.load(std::memory_order_relaxed)) {
         DWORD waitResult = WaitForSingleObject(m_hEvent, 2000);
         if (waitResult != WAIT_OBJECT_0) {
+            int sc = renderStallScore.load(std::memory_order_relaxed);
+            if (sc < 3) renderStallScore.store(sc + 1, std::memory_order_relaxed);
             if (!m_running.load(std::memory_order_relaxed)) break;
             continue;
         }
+        renderStallScore.store(0, std::memory_order_relaxed);
 
         float gain = g_gain.load(std::memory_order_relaxed);
 

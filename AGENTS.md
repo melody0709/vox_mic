@@ -1,227 +1,120 @@
-# AGENTS.md — v0.5.0
+# AGENTS.md — v0.5.1
 
-## 项目概述
+将 Android 手机麦克风用作 Windows 系统麦克风，ADB + VB-CABLE + Raw WASAPI。按需激活：有应用使用 CABLE Output 时才推流，空闲不走 DSP。
 
-将 Android 手机麦克风用作 Windows 系统麦克风，通过 ADB + VB-CABLE + Raw WASAPI 实现。支持按需激活：有 Windows 应用使用 CABLE Output 时才推流，空闲时不走 DSP。
+## Plan 管理
 
-## 文档组织
+- 新建 plan → `plan/ongoing/plan_<topic>.md`
+- 实施完成 → 移到 `plan/completed/`
+- **禁止**在项目根目录新建 `.md` plan 文件
 
-```
-├── README.md                    # 项目总览
-├── CHANGELOG.md                 # 版本变更记录
-├── ARCHITECTURE.md              # 架构说明
-├── FUTURE_ROADMAP.md            # 未来路线图
-├── AGENTS.md                    # 本文件 (AI Agent 约束)
-├── Audio_Settings_Guide.md      # 音频设置指南
-├── REFACTORING_REPORT.md        # 重构报告
-├── plan/
-│   ├── completed/               # 已完成的 plan (不可修改, 记录历史)
-│   │   ├── PHASE3_DESIGN.md     #   Phase 3 按需激活设计文档
-│   │   └── plan_raw_wasapi.md   #   初始 Raw WASAPI 计划
-│   └── ongoing/                 # 进行中的 plan (新建 plan 放这里)
-│       └── plan_optimize.md     #   整体优化计划 (Phase 4/6C 待实施)
-│       └── plan_ondemand_socket.md  # Phase 9 Socket 按需连接 (当前活跃)
-```
+## 版本号更新 (Bump Version)
 
-### Plan 管理规则
+版本号统一在 `src/version.h` (`APP_VERSION` 宏)。每次 bump 按此清单逐项修改：
 
-- 用户要求新建 plan → 在 `plan/ongoing/` 下创建 `plan_<topic>.md`
-- Plan 实施完成后 → 移到 `plan/completed/`
-- **禁止**直接在项目根目录新建 `.md` plan 文件
-- `plan/ongoing/` 下的文件被 AI 视为当前活跃的工作目标
+| # | 文件 | 位置/行 | 格式 |
+|---|------|---------|------|
+| 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
+| 2 | `AGENTS.md` | 标题 `# AGENTS.md — vx.y.z` | `vx.y.z` |
+| 3 | `README.md` | 标题 `# AudioSource Win ... vx.y.z` | `vx.y.z` |
+| 4 | `ARCHITECTURE.md` | 标题 `# 架构说明 — vx.y.z` | `vx.y.z` |
+| 5 | `FUTURE_ROADMAP.md` | 标题 `# 未来路线图 — vx.y.z+` | `vx.y.z+` |
+| 6 | `android_app/app/build.gradle` | `versionName` | 同步 `APP_VERSION` 字符串 |
+| 7 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=2) |
 
-## 构建
+`src/tray_icon.cpp` 已通过 `#include "version.h"` 自动同步，无需手动修改。
 
-### Windows 桥接程序
+## 构建 & 运行
 
 ```cmd
-build.bat
+build.bat                        # 需 VS2022 C++
+build\voxmic.exe                 # 启动 (托盘后台)
+build\voxmic.exe --list-devices  # 列出设备
 ```
 
-需要 Visual Studio 2022（含 C++ 桌面开发工作负载）。
-
-### VoxMic Source Android App
-
-环境：SDK `D:\@APP\android-platform-sdk\android-sdk`，Gradle 8.7，JDK 17。
-
+Android App (SDK `D:\@APP\android-platform-sdk\android-sdk`, Gradle 8.7, JDK 17):
 ```powershell
-cd android_app
-.\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
+cd android_app; .\gradlew.bat assembleDebug --no-daemon --console=plain
 ```
 
-## 运行
-
-直接启动（无控制台窗口，后台运行于托盘）：
-
-```cmd
-build\audiosource.exe
-```
-
-| 操作 | 效果 |
-|------|------|
-| 直接运行 | 程序启动，隐藏到系统托盘 |
-| 左键托盘图标 | 弹出设置窗口 |
-| 关闭设置窗口 [X] | 隐藏到托盘（不退出） |
-| 右键托盘菜单 → Demand Mode | 切换按需激活开/关（持久化到注册表） |
-| 右键托盘菜单 → Always Hot | 切换 socket 常连接开/关（持久化到注册表） |
-| 右键托盘菜单 → Exit | 彻底退出 |
-
-在 Windows 应用中选择 **CABLE Output** 作为麦克风。
-
-## v0.5.0 关键参数
-
-### 传输参数
-
-| 参数 | 值 | 位置 |
-|------|-----|------|
-| FRAMES_PER_BLOCK | 480 | `wasapi_output.h:14` |
-| BLOCK_SIZE | 960 字节 | `wasapi_output.h:16` |
-| WASAPI 缓冲 | 22ms (VB-CABLE 共享模式引擎下限) | `wasapi_output.cpp:73` |
-| 环形水位 | 3→2 | `main.cpp:126-127` |
-| 初始填充 | 0 (直接启动, 无等待) | `main.cpp` |
-| Android BLOCK_SIZE | 960 字节 | `RecordThread.java:37` |
-| Android AudioRecord 缓冲 | `1 × minBufSize` (~10ms) | `RecordService.java:101` |
-| 总延迟 | **~40ms** (实测) | |
-
-### 按需激活参数 (Phase 3 + Phase 8)
-
-| 参数 | 值 | 位置 |
-|------|-----|------|
-| Monitor 检测方式 | **事件驱动** (IAudioSessionNotification + IAudioSessionEvents) | `mic_usage_monitor.h/cpp` |
-| Monitor 线程 | `Sleep(1000)` 仅保持 COM 公寓存活 | `main.cpp` |
-| 检测延迟 | **即时** (COM 回调) | 事件驱动，无需轮询 |
-| Demand Mode 开关 | 右键托盘菜单，持久化到注册表 | `tray_icon.cpp`, `config.h/cpp` |
-| 空闲 CPU | **0-0.1%** | 事件驱动，零 COM 调用 |
-| 空闲 ring buffer reset | 每 50 blocks (0.5s) | `main.cpp` |
-| Socket stall 断连阈值 | 9s (90 × 100ms) | `main.cpp` |
-| Socket 空闲断连阈值 | 5s (500 blocks) Always Hot OFF 时 | `main.cpp` |
-| Bridge 重连延迟 | ~0.3-0.8ms (实测 QPC) | `main.cpp` |
-| 冷启动延迟 | ~200ms (Sleep 200ms 轮询外循环) | `main.cpp` |
-
-### DSP 管线
-
-| 阶段 | 参数 | 可开关 | 位置 |
-|------|------|--------|------|
-| RNNoise | 22-Bark GRU, 10ms | `g_nrEnabled` | `dsp/pipeline.h` |
-| HPF | 80Hz, Q=0.707 | 始终 | `dsp/pipeline.h` |
-| EQ | 6-band, Pres 0–6dB, Bass -6–0dB | `g_eqEnabled` | `dsp/pipeline.h` |
-| Compressor | -18dBFS, 3:1, 5/50ms | `g_compressorEnabled` | `dsp/pipeline.h` |
-| Limiter | -1dBFS | 始终 | `dsp/pipeline.h` |
-
-### 配置字段 (20)
-
-| 分类 | 字段 | 类型 | 默认 |
-|------|------|------|------|
-| 网络 | serial / host / port | string/string/int | /127.0.0.1/27183 |
-| Android | androidSocket / androidComponent / androidAppPreset | string/string/int | audiosource/fr.dzx.../0 |
-| 增益 | gain | float (0.25~4.0) | 1.5 |
-| 音效 | nsEnabled / aecEnabled / agcEnabled | bool | true/true/true |
-| DSP | eqEnabled / compressorEnabled / nrEnabled | bool | true/true/true |
-| DSP | eqPresence / eqBassCut | float (0~6 / -6~0) | 3.0 / -3.0 |
-| 界面 | debugConsole | bool | true |
-| 按需 | demandMode | bool | true |
-| 按需 | alwaysHot | bool | false |
-
-### 全局原子变量
-
-| 变量 | 用途 | 线程 |
-|------|------|------|
-| `g_gain` | 增益倍率 | bridge → render |
-| `g_nrEnabled` | RNNoise 开关 | bridge → render |
-| `g_eqEnabled` | EQ 开关 | bridge → render |
-| `g_eqPresence` | Presence dB | bridge → render |
-| `g_eqBassCut` | Bass Cut dB | bridge → render |
-| `g_compressorEnabled` | 压缩器开关 | bridge → render |
-| `g_micRequested` | Windows 应用是否在捕获 (Phase 3) | monitor → bridge |
-| `g_micStreaming` | 当前是否在推流 (Phase 3) | bridge → tray |
-| `g_micOnTick` | 检测延迟时间戳 (Phase 3) | monitor → bridge |
-| `g_demandMode` | Demand Mode 开关 (Phase 8) | tray → monitor/bridge |
-| `g_alwaysHot` | Always Hot 开关 (Phase 9) | tray → bridge |
-
-`syncDspAtomsFromConfig()` 在 `main.cpp`，启动和每次重连时调用。
+Windows 应用中选 **CABLE Output** 作为麦克风。托盘图标：左键=设置窗口，右键=菜单(Demand Mode / Always Hot / Exit)，关闭窗口=隐藏。
 
 ## 源文件结构
 
 ```
 src/
-├── main.cpp
-├── wasapi_output.h/cpp
-├── device_enum.h/cpp
-├── ring_buffer.h
-├── socket_client.h/cpp
-├── adb_control.h/cpp          # ADB 命令 (CreateProcess + CREATE_NO_WINDOW, 无闪烁)
-├── tray_icon.h/cpp            # 系统托盘 + 右键菜单 (含版本号)
-├── config.h/cpp               # 注册表持久化 (18 字段)
-├── settings_dialog.h/cpp       # 主窗口 UI (非模态, 关闭即隐藏到托盘)
-├── mic_usage_monitor.h/cpp   # Phase 3+8: 事件驱动 (IAudioSessionNotification + IAudioSessionEvents)
+├── main.cpp                     # 主线程 + monitor/bridge 线程
+├── wasapi_output.h/cpp          # WASAPI 事件驱动渲染 (CABLE Input render 端点)
+├── device_enum.h/cpp            # 设备枚举 (findVBCableDevice 等)
+├── ring_buffer.h                # SPS 环形缓冲
+├── socket_client.h/cpp          # TCP socket 客户端
+├── adb_control.h/cpp            # ADB (CreateProcess + CREATE_NO_WINDOW)
+├── tray_icon.h/cpp              # 系统托盘 + 右键菜单
+├── config.h/cpp                 # 注册表持久化 (20 字段)
+├── settings_dialog.h/cpp        # 非模态设置窗口
+├── mic_usage_monitor.h/cpp      # 事件驱动 COM + IAudioMeterInformation 静音兜底
 └── dsp/
-    ├── biquad.h              # BiQuad IIR 滤波器
-    ├── pipeline.h            # DSP 链 (RNNoise→HPF→EQ→Comp→Limiter)
-    └── rnnoise/ (27 files)   # 官方 RNNoise v0.2 源码
-        ├── rnnoise.h          # 公共 API
-        ├── denoise.c/h        # 降噪核心
-        ├── rnn.c/h            # RNN 推理
-        ├── rnnoise_data.c/h   # 预生成模型权重 (5MB)
-        ├── nnet.c/h           # 神经网络层
-        ├── pitch.c/h          # 音高检测
-        ├── kiss_fft.c/h       # FFT 库
-        └── ...                # 辅助文件
+    ├── pipeline.h               # DSP 链 (RNNoise→HPF→EQ→Comp→Limiter)
+    ├── biquad.h                 # BiQuad IIR
+    └── rnnoise/ (27 files)      # 官方 RNNoise v0.2 (C 编译, 无外部依赖)
 ```
 
 ## 线程模型
 
 ```
-main thread:         消息泵 + SetTimer(stats)
-monitor thread:      Sleep(1000) 仅保持 COM 公寓存活 (Phase 8 事件驱动)
-bridge thread:       ADB 管理 + Socket recv → g_micRequested 门控 → ring buffer push/discard
-render thread:       ring buffer pop → int16→float → DspPipeline → WASAPI write
+main:      消息泵 + SetTimer(stats)
+monitor:   idle Sleep(1000) / active 每1s GetPeakValue()
+bridge:    ADB 管理 + Socket recv → g_micRequested 门控 → ring buffer
+render:    ring buffer pop → int16→float → DspPipeline → WASAPI write
 ```
 
-## RNNoise 构建说明
+## 关键参数
 
-来源: `werman/noise-suppression-for-voice` 的 `external/rnnoise/` (原始 `xiph/rnnoise` 缺少 autotools 生成的 `rnnoise_data.c/h`)。
+| 参数 | 值 | 位置 |
+|------|-----|------|
+| FRAMES_PER_BLOCK / BLOCK_SIZE | 480 / 960B | `wasapi_output.h:14-16` |
+| SAMPLE_RATE | 48000 Hz | `wasapi_output.h:12` |
+| RING_BUFFER_BLOCKS | 128 | `wasapi_output.h:17` |
+| WASAPI 缓冲 | ~22ms (共享模式下限) | `wasapi_output.cpp:73` |
+| 环形水位 | 3→2 | `main.cpp` |
+| Android AudioRecord | 1× minBufSize | `RecordService.java:101` |
+| 总延迟 | ~40ms | |
 
-构建: 所有 .c 文件作为 C 编译，`/I src\dsp\rnnoise` 加入 include 路径。**无外部依赖**。
+### 按需激活
 
-## Phase 3 — 麦克风按需激活 (已完成 v0.4.0)
+| 机制 | 触发 | 延迟 | 开销 |
+|------|------|------|------|
+| OnStateChanged (事件) | COM 回调 | 即时 | 零 |
+| renderStallScore | render event 3×超时 | ~6s | 零 (已有) |
+| IAudioMeterInformation | monitor 线程 (仅活跃态) | ~3s | 1 COM/秒 |
+| **idle 态** | Sleep(1000) 循环 | — | **零 CPU / 零 COM** |
 
-- **MicUsageMonitor**: `src/mic_usage_monitor.h/cpp` — IAudioSessionManager2 按需检测 CABLE Output 捕获状态
-- **Always Hot**: bridge 永不主动断连 socket，空闲时 recv + 丢弃，不 push ring buffer
-- **ADB 一次性初始化**: `SetupAudioSource` 只在启动时调用，socket 重连仅 `connect()` (~200ms)
-- **检测延迟实测 ~12ms** (monitor ON → bridge 首块 push)
-- **端到端延迟 ~40ms** (实测, 比 v0.3.0 的 ~85ms 减半)
-- **空闲 CPU ~0.25%** (DSP 全跳, monitor 0.15%, WASAPI 静音 0.1%)
+| 阈值 | 值 |
+|------|-----|
+| Socket stall 断连 | 9s (90×100ms) |
+| Socket 空闲断连 | 5s (500 blocks, AlwaysHot OFF) |
+| Ring buffer reset | 每 50 blocks (0.5s) |
+| Bridge 重连 | ~0.3-0.8ms QPC |
 
-## Phase 5 — 隐藏到托盘 GUI (已完成 v0.4.1)
+### DSP 管线 & 配置
 
-- **非模态主窗口**: `settings_dialog.cpp` 改造为 `createSettingsWindow()`，不再使用模态消息循环
-- **隐藏到托盘**: `WM_CLOSE` → `ShowWindow(SW_HIDE)`，`WM_TRAYICON + WM_LBUTTONUP` → `ShowWindow(SW_SHOW)`
-- **无 CMD 窗口**: `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`，Debug Console `AllocConsole()` 按需分配
-- **ADB 无闪烁**: `_popen` → `CreateProcess(NULL, …, CREATE_NO_WINDOW, …)`，`runCommandNoWindow()` 公开共用
-- **设置即主窗口**: 右键菜单 "Settings" 显示设置窗口，OK 保存隐藏，Cancel 恢复隐藏
-- **版本号**: 托盘右键菜单底部灰色 `v0.4.1`
+DSP: RNNoise(22-Bark GRU) → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass -6-0dB) → Comp(-18dBFS, 3:1) → Limiter(-1dBFS)
 
-## Phase 8 — CPU 优化 (已完成 v0.4.2)
+| 原子变量 | 用途 | 线程 |
+|------|------|------|
+| `g_gain` | 增益倍率 | bridge → render |
+| `g_nrEnabled` / `g_eqEnabled` / `g_compressorEnabled` | DSP 开关 | bridge → render |
+| `g_eqPresence` / `g_eqBassCut` | EQ 参数 | bridge → render |
+| `g_micRequested` | 应用是否在捕获 | monitor → bridge |
+| `g_micStreaming` | 是否在推流 | bridge → tray |
+| `g_micOnTick` | 检测延迟时间戳 | monitor → bridge |
+| `g_demandMode` | Demand Mode 开关 | tray → monitor/bridge |
+| `g_alwaysHot` | Always Hot 开关 | tray → bridge |
 
-- **事件驱动 Monitor**: `IAudioSessionNotification` + `IAudioSessionEvents` COM 回调替代 100ms 轮询
-- **零 COM 开销**: 空闲时无 `GetSessionEnumerator()` / `Activate()` / `Release()` 调用
-- **Demand Mode 开关**: 右键托盘菜单，持久化到注册表，用户可对比观察 CPU
-- **DSP 开销实测**: 仅 ~0.1%（远低于 Phase 3 设计文档预估的 ~1.65%）
-- **空闲 CPU**: 0-0.1%（从 v0.4.1 的 0.2-0.4% 优化）
+配置 20 字段，注册表持久化。`syncDspAtomsFromConfig()` 在 `main.cpp`，启动和重连时调用。
 
-## Phase 9 — Socket 按需连接 (已完成 v0.4.3)
+### Monitor 三层检测
 
-- **Always Hot 开关**: 右键托盘菜单勾选控制，持久化到注册表
-- **OFF (默认)**: 空闲 5s 后主动断连 socket → Android `accept()` 等待 → AudioRecord 停止 → 零耗电
-- **ON**: 保持旧行为 — socket 永不主动断连，Android 持续录音
-- **按需重连**: bridge 外层循环轮询 `g_micRequested` (Sleep 200ms)，有需求时 `connect()` (~0.4ms 实测)
-- **冷启动延迟**: ~200ms (200ms 轮询为主，socket connect 仅 ~0.4ms 实测)
-- **不改 Android 端**: `RecordThread.accept → startRecording → stop → accept` 循环已完美匹配
-
-## Next: DeepFilterNet3 (Phase 6C)
-
-- libDF C 共享库，感知质量优于 RNNoise
-- MIT/Apache-2.0 双协议
-- 预编译 Windows .dll 可用
-- 替换 RNNoise 为 DspPipeline 的 stage 0
+1. **COM 事件回调** (`IAudioSessionNotification` + `IAudioSessionEvents`): 靶向 CABLE Output 采集端点 (`EnumAudioEndpoints(eCapture)` 按名匹配，找不到 fallback 默认)
+2. **Render event 超时** (`wasapi_output.cpp`): 连续3次 `WaitForSingleObject` 超时 → `renderStallScore=3`，bridge 用 `effectiveActive = demandOff || (micRequested && !renderStalled)` 门控
+3. **IAudioMeterInformation** (`mic_usage_monitor.cpp`): 活跃时每1s `GetPeakValue()`，连续3s峰值<阈值 → 强制 `g_micRequested=false`；idle 时不调用

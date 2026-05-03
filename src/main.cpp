@@ -74,12 +74,32 @@ VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
 }
 
 void micMonitorThread() {
+    int silenceCount = 0;
     while (g_running.load(std::memory_order_relaxed)) {
         if (!g_demandMode.load(std::memory_order_relaxed)) {
             g_micRequested.store(true, std::memory_order_relaxed);
+            silenceCount = 0;
             Sleep(500);
             continue;
         }
+
+        if (!g_micRequested.load(std::memory_order_relaxed)) {
+            silenceCount = 0;
+            Sleep(1000);
+            continue;
+        }
+
+        float peak = g_micMonitor.getCapturePeak();
+        if (peak > 0.0001f) {
+            silenceCount = 0;
+        } else {
+            silenceCount++;
+            if (silenceCount >= 3) {
+                g_micRequested.store(false, std::memory_order_relaxed);
+                silenceCount = 0;
+            }
+        }
+
         Sleep(1000);
     }
 }
@@ -201,8 +221,10 @@ void audioBridgeThread() {
 
             bool micRequested = g_micRequested.load(std::memory_order_relaxed);
             bool demandOff = !g_demandMode.load(std::memory_order_relaxed);
+            bool renderStalled = g_wasapiOutput && g_wasapiOutput->renderStallScore.load(std::memory_order_relaxed) >= 3;
+            bool effectiveActive = demandOff || (micRequested && !renderStalled);
 
-            if (!micRequested && !demandOff) {
+            if (!effectiveActive) {
                 g_micStreaming.store(false);
                 if (g_trayIcon && !wasIdle) g_trayIcon->updateIcon(false, true);
                 idleCount++;
