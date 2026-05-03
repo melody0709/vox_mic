@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.5.2 (2026-05-03)
+
+### Phase 12: RNNoise 降噪强度可调 + Hint 样式优化
+
+| 特性 | 说明 |
+|------|------|
+| **NR Strength 滑块** | 0.30–0.95，默认 0.60，调节 RNNoise alpha 增益平滑参数（降噪激进程度） |
+| **滑块 Hint** | Presence / Bass Cut / NR Strength 下方灰色小字说明，16pt 字体 |
+| **Build 零 Warning** | `/wd4305 /wd4244` 抑制 RNNoise 上游警告，项目代码 C4100/C4189 已修复 |
+
+#### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/dsp/rnnoise/denoise.c` | `DenoiseState` 加 `strength` 字段；`alpha` 从字段读取；`rnnoise_set_strength()` 实现 |
+| `src/dsp/rnnoise/rnnoise.h` | 新增 `rnnoise_set_strength(DenoiseState*, float)` |
+| `src/config.h/cpp` | 新增 `nrStrength` 字段 (0.3–0.95, 默认 0.6), INI 键 `NrStrength`，配置字段 → 21 |
+| `src/dsp/pipeline.h` | 新增 `g_nrStrength` 原子变量 + `updateSettings()` 调用 `rnnoise_set_strength` |
+| `src/main.cpp` | `syncDspAtomsFromConfig()` 新增 `g_nrStrength` 同步 |
+| `src/settings_dialog.cpp` | DSP 标签页新增 NR Strength 滑块 + 3 个 hint 标签（小字灰色，WM_CTLCOLORSTATIC） |
+| `build.bat` | 链接 `gdi32.lib`，编译标志 `/wd4305 /wd4244` |
+| `AGENTS.md` | "注册表持久化" → "config.ini"；配置字段 20→21；新增 release 构建说明 |
+
+#### 清理归档
+
+| 文件 | 操作 |
+|------|------|
+| `plan_nr_strength.md` | 新增 → `plan/ongoing/` |
+| `plan_hint_style.md` | 新增 → `plan/ongoing/` |
+| `plan_optimize.md` | `plan/ongoing/` → `plan/completed/` |
+
+---
+
 ## v0.5.1 (2026-05-03)
 
 ### Phase 10: 按需激活检测修复 — Sound Recorder 停止后不 idle

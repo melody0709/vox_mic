@@ -77,6 +77,9 @@ Config Config::load() {
     if (cfg.eqBassCut > 0.0f) cfg.eqBassCut = 0.0f;
     cfg.compressorEnabled = readIniInt(path.c_str(), "CompressorEnabled", 1) != 0;
     cfg.nrEnabled = readIniInt(path.c_str(), "NrEnabled", 1) != 0;
+    cfg.nrStrength = readIniFloat(path.c_str(), "NrStrength", 0.6f);
+    if (cfg.nrStrength < 0.3f) cfg.nrStrength = 0.3f;
+    if (cfg.nrStrength > 0.95f) cfg.nrStrength = 0.95f;
     cfg.debugConsole = readIniInt(path.c_str(), "DebugConsole", 1) != 0;
     cfg.demandMode = readIniInt(path.c_str(), "DemandMode", 1) != 0;
     cfg.alwaysHot = readIniInt(path.c_str(), "AlwaysHot", 0) != 0;
@@ -102,6 +105,7 @@ void Config::save() const {
     writeIniFloat(path.c_str(), "EqBassCut", eqBassCut);
     writeIniInt(path.c_str(), "CompressorEnabled", compressorEnabled ? 1 : 0);
     writeIniInt(path.c_str(), "NrEnabled", nrEnabled ? 1 : 0);
+    writeIniFloat(path.c_str(), "NrStrength", nrStrength);
     writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0);
     writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0);
     writeIniInt(path.c_str(), "AlwaysHot", alwaysHot ? 1 : 0);

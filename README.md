@@ -1,4 +1,4 @@
-# AudioSource Win (Raw WASAPI) v0.5.1
+# AudioSource Win (Raw WASAPI) v0.5.2
 
 将 Android 手机麦克风用作 Windows 系统麦克风，通过 ADB + VB-CABLE + Raw WASAPI 实现。支持按需激活：有 Windows 应用使用 CABLE Output 时才推流，空闲时不走 DSP。
 

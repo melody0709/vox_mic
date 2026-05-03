@@ -1,4 +1,4 @@
-# AGENTS.md — v0.5.1
+# AGENTS.md — v0.5.2
 
 将 Android 手机麦克风用作 Windows 系统麦克风，ADB + VB-CABLE + Raw WASAPI。按需激活：有应用使用 CABLE Output 时才推流，空闲不走 DSP。
 
@@ -20,7 +20,7 @@
 | 4 | `ARCHITECTURE.md` | 标题 `# 架构说明 — vx.y.z` | `vx.y.z` |
 | 5 | `FUTURE_ROADMAP.md` | 标题 `# 未来路线图 — vx.y.z+` | `vx.y.z+` |
 | 6 | `android_app/app/build.gradle` | `versionName` | 同步 `APP_VERSION` 字符串 |
-| 7 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=2) |
+| 7 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=3) |
 
 `src/tray_icon.cpp` 已通过 `#include "version.h"` 自动同步，无需手动修改。
 
@@ -37,6 +37,32 @@ Android App (SDK `D:\@APP\android-platform-sdk\android-sdk`, Gradle 8.7, JDK 17)
 cd android_app; .\gradlew.bat assembleDebug --no-daemon --console=plain
 ```
 
+### Android Release 构建
+
+```powershell
+cd android_app; .\gradlew.bat assembleRelease --no-daemon --console=plain
+```
+
+输出: `VoxMic_Source-v<versionName>.apk`（由 `build.gradle` 自动命名，无需手动改名）。
+
+需要 `keystore.properties` + `voxmic.keystore`（均为 gitignore，新 clone 缺失时需生成）：
+
+```powershell
+& "C:\Program Files\Java\jdk-17\bin\keytool.exe" -genkey -v `
+  -keystore android_app/voxmic.keystore -alias voxmic `
+  -keyalg RSA -keysize 2048 -validity 10000 `
+  -storepass voxmic123 -keypass voxmic123 `
+  -dname "CN=VoxMic, OU=Dev, O=VoxMic, L=N/A, ST=N/A, C=CN"
+```
+
+然后创建 `android_app/keystore.properties`:
+```
+storePassword=voxmic123
+keyPassword=voxmic123
+keyAlias=voxmic
+storeFile=../voxmic.keystore
+```
+
 Windows 应用中选 **CABLE Output** 作为麦克风。托盘图标：左键=设置窗口，右键=菜单(Demand Mode / Always Hot / Exit)，关闭窗口=隐藏。
 
 ## 源文件结构
@@ -50,7 +76,7 @@ src/
 ├── socket_client.h/cpp          # TCP socket 客户端
 ├── adb_control.h/cpp            # ADB (CreateProcess + CREATE_NO_WINDOW)
 ├── tray_icon.h/cpp              # 系统托盘 + 右键菜单
-├── config.h/cpp                 # 注册表持久化 (20 字段)
+├── config.h/cpp                 # config.ini 持久化 (21 字段)
 ├── settings_dialog.h/cpp        # 非模态设置窗口
 ├── mic_usage_monitor.h/cpp      # 事件驱动 COM + IAudioMeterInformation 静音兜底
 └── dsp/
@@ -104,6 +130,7 @@ DSP: RNNoise(22-Bark GRU) → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass -6-0dB) 
 |------|------|------|
 | `g_gain` | 增益倍率 | bridge → render |
 | `g_nrEnabled` / `g_eqEnabled` / `g_compressorEnabled` | DSP 开关 | bridge → render |
+| `g_nrStrength` | NR 降噪强度 (0.3-0.95) | bridge → render |
 | `g_eqPresence` / `g_eqBassCut` | EQ 参数 | bridge → render |
 | `g_micRequested` | 应用是否在捕获 | monitor → bridge |
 | `g_micStreaming` | 是否在推流 | bridge → tray |
@@ -111,7 +138,7 @@ DSP: RNNoise(22-Bark GRU) → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass -6-0dB) 
 | `g_demandMode` | Demand Mode 开关 | tray → monitor/bridge |
 | `g_alwaysHot` | Always Hot 开关 | tray → bridge |
 
-配置 20 字段，注册表持久化。`syncDspAtomsFromConfig()` 在 `main.cpp`，启动和重连时调用。
+配置 21 字段，config.ini 持久化。`syncDspAtomsFromConfig()` 在 `main.cpp`，启动和重连时调用。
 
 ### Monitor 三层检测
 

@@ -84,6 +84,7 @@ struct DenoiseState {
   kiss_fft_cpx delayed_P[FREQ_SIZE];
   float delayed_Ex[NB_BANDS], delayed_Ep[NB_BANDS];
   float delayed_Exp[NB_BANDS];
+  float strength;
 
 };
 
@@ -284,6 +285,7 @@ int rnnoise_get_frame_size() {
 
 int rnnoise_init(DenoiseState *st, RNNModel *model) {
   memset(st, 0, sizeof(*st));
+  st->strength = .6f;
 #if !TRAINING
   if (model != NULL) {
     WeightArray *list;
@@ -322,6 +324,12 @@ DenoiseState *rnnoise_create(RNNModel *model) {
 
 void rnnoise_destroy(DenoiseState *st) {
   free(st);
+}
+
+void rnnoise_set_strength(DenoiseState *st, float strength) {
+  if (strength < 0.3f) strength = 0.3f;
+  if (strength > 0.95f) strength = 0.95f;
+  st->strength = strength;
 }
 
 #if TRAINING
@@ -477,7 +485,7 @@ float rnnoise_process_frame(DenoiseState *st, float *out, const float *in) {
 #endif
     rnn_pitch_filter(st->delayed_X, st->delayed_P, st->delayed_Ex, st->delayed_Ep, st->delayed_Exp, g);
     for (i=0;i<NB_BANDS;i++) {
-      float alpha = .6f;
+      float alpha = st->strength;
       g[i] = MAX16(g[i], alpha*st->lastg[i]);
       st->lastg[i] = g[i];
     }

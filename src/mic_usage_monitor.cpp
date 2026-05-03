@@ -61,7 +61,7 @@ STDMETHODIMP MicUsageMonitor::OnStateChanged(AudioSessionState NewState) {
     return S_OK;
 }
 
-STDMETHODIMP MicUsageMonitor::OnSessionDisconnected(AudioSessionDisconnectReason DisconnectReason) {
+STDMETHODIMP MicUsageMonitor::OnSessionDisconnected(AudioSessionDisconnectReason) {
     return S_OK;
 }
 

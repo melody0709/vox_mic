@@ -19,6 +19,7 @@ public:
     float eqBassCut = -3.0f;
     bool compressorEnabled = true;
     bool nrEnabled = true;
+    float nrStrength = 0.6f;
     bool debugConsole = true;
     bool demandMode = true;
     bool alwaysHot = false;

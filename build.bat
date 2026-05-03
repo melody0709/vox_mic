@@ -39,7 +39,7 @@ rc /fo build\voxmic.res src\voxmic.rc
 echo Compiling...
 cl /O2 /EHsc /std:c++17 ^
     /Fo:build\ ^
-    /W4 /WX- ^
+    /W4 /WX- /wd4305 /wd4244 ^
     /I src\dsp\rnnoise ^
     src\main.cpp ^
     src\wasapi_output.cpp ^
@@ -62,7 +62,7 @@ cl /O2 /EHsc /std:c++17 ^
     src\dsp\rnnoise\rnnoise_data.c ^
     build\voxmic.res ^
     /Fe:build\voxmic.exe ^
-    /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
+    /link ws2_32.lib ole32.lib mmdevapi.lib shell32.lib advapi32.lib comctl32.lib gdi32.lib /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup
 
 if %ERRORLEVEL% EQU 0 (
     echo.

@@ -12,6 +12,7 @@ extern std::atomic<float> g_eqPresence;
 extern std::atomic<float> g_eqBassCut;
 extern std::atomic<bool> g_compressorEnabled;
 extern std::atomic<bool> g_nrEnabled;
+extern std::atomic<float> g_nrStrength;
 
 #include "dsp/biquad.h"
 
@@ -28,6 +29,8 @@ public:
 
     void updateSettings(float sampleRate) {
         m_nrActive = g_nrEnabled.load(std::memory_order_relaxed);
+        if (m_rnnoise)
+            rnnoise_set_strength(m_rnnoise, g_nrStrength.load(std::memory_order_relaxed));
         bool eqOn = g_eqEnabled.load(std::memory_order_relaxed);
         float presence = g_eqPresence.load(std::memory_order_relaxed);
         float bassCut = g_eqBassCut.load(std::memory_order_relaxed);
@@ -93,6 +96,7 @@ public:
 
 private:
     void processFallback(float* samples, int numSamples, float sampleRate) {
+        (void)sampleRate;
         bool eqOn = g_eqEnabled.load(std::memory_order_relaxed);
         bool compOn = g_compressorEnabled.load(std::memory_order_relaxed);
         if (eqOn) {

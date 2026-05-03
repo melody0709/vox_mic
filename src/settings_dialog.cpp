@@ -40,12 +40,16 @@ extern void syncDspAtomsFromConfig();
 #define IDC_TAB_MAIN          2020
 #define IDC_BTN_RESET         2021
 #define IDC_CHECK_DEBUG       2022
+#define IDC_TRACKBAR_NRSTR    2023
+#define IDC_LABEL_NRSTR       2024
 
 struct SettingsDialogData {
     Config* pConfig;
     HWND hTab;
     std::vector<HWND> tabGeneralControls;
     std::vector<HWND> tabDspControls;
+    std::vector<HWND> hintControls;
+    HFONT hHintFont;
 };
 
 static void refreshDeviceList(HWND hCombo, const std::string& currentSerial) {
@@ -101,6 +105,14 @@ static void updateBassLabel(HWND hWnd) {
     SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_BASS), buf);
 }
 
+static void updateNrStrLabel(HWND hWnd) {
+    int pos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_GETPOS, 0, 0);
+    float val = (float)pos / 100.0f;
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.2f", val);
+    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_NRSTR), buf);
+}
+
 static void showTabControls(const SettingsDialogData* pData, int tabIndex) {
     int swGen = (tabIndex == 0) ? SW_SHOW : SW_HIDE;
     int swDsp = (tabIndex == 1) ? SW_SHOW : SW_HIDE;
@@ -148,6 +160,12 @@ static void loadUiFromConfig(HWND hWnd, const Config* cfg) {
         cfg->compressorEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
         cfg->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+
+    int nrPos = (int)(cfg->nrStrength * 100.0f);
+    if (nrPos < 30) nrPos = 30;
+    if (nrPos > 95) nrPos = 95;
+    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_SETPOS, TRUE, nrPos);
+    updateNrStrLabel(hWnd);
 
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_SETCHECK,
         cfg->debugConsole ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -206,6 +224,10 @@ static void saveUiToConfig(HWND hWnd, Config* cfg) {
         (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_GETCHECK, 0, 0) == BST_CHECKED);
     cfg->nrEnabled =
         (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    int nrPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_GETPOS, 0, 0);
+    cfg->nrStrength = (float)nrPos / 100.0f;
+    if (cfg->nrStrength < 0.3f) cfg->nrStrength = 0.3f;
+    if (cfg->nrStrength > 0.95f) cfg->nrStrength = 0.95f;
 
     cfg->debugConsole =
         (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -220,13 +242,16 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         Config* cfg = (Config*)pCreate->lpCreateParams;
         pData = new SettingsDialogData();
         pData->pConfig = cfg;
+        pData->hHintFont = CreateFontA(16, 0, 0, 0, FW_NORMAL, 0, 0, 0,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY, DEFAULT_PITCH, "MS Shell Dlg");
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
 
         HINSTANCE hInst = pCreate->hInstance;
         
         pData->hTab = CreateWindowExA(0, WC_TABCONTROLA, "",
             WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
-            10, 10, 465, 360, hWnd, (HMENU)IDC_TAB_MAIN, hInst, NULL);
+            10, 10, 465, 465, hWnd, (HMENU)IDC_TAB_MAIN, hInst, NULL);
             
         TCITEMA tie = {};
         tie.mask = TCIF_TEXT;
@@ -300,7 +325,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE,
             xMargin, yBase, lblW, 22, hWnd, NULL, hInst, NULL));
 
-        HWND hGainLabel = addGen(CreateWindowExA(0, "STATIC", "",
+        addGen(CreateWindowExA(0, "STATIC", "",
             WS_CHILD | WS_VISIBLE,
             ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_GAIN, hInst, NULL));
 
@@ -362,7 +387,14 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageA(hPresTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
         SendMessageA(hPresTrackbar, TBM_SETTICFREQ, 10, 0);
 
-        yBase += 35;
+        yBase += 27;
+
+        HWND hPresHint = addDsp(CreateWindowExA(0, "STATIC", "Boost vocal presence in the 2-3kHz range",
+            WS_CHILD,
+            xMargin + 20, yBase, 330, 16, hWnd, NULL, hInst, NULL));
+        pData->hintControls.push_back(hPresHint);
+
+        yBase += 20;
 
         addDsp(CreateWindowExA(0, "STATIC", "Bass Cut:",
             WS_CHILD,
@@ -378,7 +410,14 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SendMessageA(hBassTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
         SendMessageA(hBassTrackbar, TBM_SETTICFREQ, 10, 0);
 
-        yBase += 40;
+        yBase += 27;
+
+        HWND hBassHint = addDsp(CreateWindowExA(0, "STATIC", "Cut low-frequency rumble below 250Hz",
+            WS_CHILD,
+            xMargin + 20, yBase, 330, 16, hWnd, NULL, hInst, NULL));
+        pData->hintControls.push_back(hBassHint);
+
+        yBase += 20;
 
         addDsp(CreateWindowExA(0, "BUTTON", "Compressor Enable",
             WS_CHILD | BS_AUTOCHECKBOX,
@@ -390,9 +429,38 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | BS_AUTOCHECKBOX,
             xMargin, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL));
 
+        yBase += 35;
+
+        addDsp(CreateWindowExA(0, "STATIC", "NR Strength:",
+            WS_CHILD,
+            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL));
+
+        addDsp(CreateWindowExA(0, "STATIC", "",
+            WS_CHILD,
+            ctrlX + 195, yBase, 70, 22, hWnd, (HMENU)IDC_LABEL_NRSTR, hInst, NULL));
+
+        HWND hNrStrTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
+            WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
+            ctrlX, yBase + 1, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_NRSTR, hInst, NULL));
+        SendMessageA(hNrStrTrackbar, TBM_SETRANGE, TRUE, MAKELONG(30, 95));
+        SendMessageA(hNrStrTrackbar, TBM_SETTICFREQ, 10, 0);
+
+        yBase += 27;
+
+        HWND hNrHint = addDsp(CreateWindowExA(0, "STATIC", "Lower = gentler, keeps natural tone  |  Higher = stronger noise suppression",
+            WS_CHILD,
+            xMargin + 20, yBase, 420, 16, hWnd, NULL, hInst, NULL));
+        pData->hintControls.push_back(hNrHint);
+
+        yBase += 20;
+
+        for (HWND hHint : pData->hintControls) {
+            SendMessageA(hHint, WM_SETFONT, (WPARAM)pData->hHintFont, TRUE);
+        }
+
         loadUiFromConfig(hWnd, cfg);
 
-        int btnY = 385;
+        int btnY = 490;
         
         CreateWindowExA(0, "BUTTON", "Reset to Defaults",
             WS_CHILD | WS_VISIBLE,
@@ -419,6 +487,18 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         }
         return 0;
 
+    case WM_CTLCOLORSTATIC: {
+        HWND hCtrl = (HWND)lParam;
+        for (HWND hHint : pData->hintControls) {
+            if (hCtrl == hHint) {
+                SetBkMode((HDC)wParam, TRANSPARENT);
+                SetTextColor((HDC)wParam, RGB(128, 128, 128));
+                return (LRESULT)GetStockObject(NULL_BRUSH);
+            }
+        }
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+
     case WM_NOTIFY: {
         LPNMHDR lpnmhdr = (LPNMHDR)lParam;
         if (lpnmhdr->idFrom == IDC_TAB_MAIN && lpnmhdr->code == TCN_SELCHANGE) {
@@ -440,6 +520,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             updatePresLabel(hWnd);
         } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_BASS)) {
             updateBassLabel(hWnd);
+        } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR)) {
+            updateNrStrLabel(hWnd);
         }
         return 0;
     }
@@ -517,6 +599,10 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         return 0;
 
     case WM_DESTROY:
+        if (pData && pData->hHintFont) {
+            DeleteObject(pData->hHintFont);
+            pData->hHintFont = NULL;
+        }
         delete pData;
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, 0);
         return 0;
@@ -551,7 +637,7 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
         SETTINGS_CLASS,
         "VoxMic - Settings",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        0, 0, 500, 460,
+        0, 0, 500, 565,
         NULL, NULL, hInstance, pConfig);
 
     if (!hWnd) return NULL;

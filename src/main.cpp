@@ -27,6 +27,7 @@ std::atomic<float> g_eqPresence{3.0f};
 std::atomic<float> g_eqBassCut{-3.0f};
 std::atomic<bool> g_compressorEnabled{true};
 std::atomic<bool> g_nrEnabled{true};
+std::atomic<float> g_nrStrength{0.6f};
 std::atomic<bool> g_micRequested{false};
 static std::atomic<bool> g_micStreaming{false};
 std::atomic<bool> g_demandMode{true};
@@ -45,6 +46,7 @@ void syncDspAtomsFromConfig() {
     g_eqBassCut.store(g_config.eqBassCut, std::memory_order_relaxed);
     g_compressorEnabled.store(g_config.compressorEnabled, std::memory_order_relaxed);
     g_nrEnabled.store(g_config.nrEnabled, std::memory_order_relaxed);
+    g_nrStrength.store(g_config.nrStrength, std::memory_order_relaxed);
 }
 
 static void setConsoleVisible(bool visible) {
@@ -61,7 +63,7 @@ static void setConsoleVisible(bool visible) {
     }
 }
 
-VOID CALLBACK statsTimerProc(HWND hwnd, UINT, UINT_PTR, DWORD) {
+VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
     printf("[Stats] recv=%d drop=%d underrun=%d queue=%zu proc=%.0fus lat=%.1fms\n",
         g_wasapiOutput->receivedBlocks.load(),
