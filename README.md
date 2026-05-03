@@ -37,7 +37,7 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
 直接启动，程序自动隐藏到系统托盘：
 
 ```cmd
-build\audiosource.exe
+build\voxmic.exe
 ```
 
 - **左键托盘图标** → 弹出设置窗口
