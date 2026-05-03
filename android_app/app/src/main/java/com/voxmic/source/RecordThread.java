@@ -12,9 +12,6 @@ import android.util.Log;
 import java.io.IOException;
 
 public class RecordThread extends Thread {
-    private static final int SAMPLE_RATE = 48000;
-    private static final int CHANNELS = 1;
-    private static final int BYTES_PER_FRAME = 2 * CHANNELS;
     private static final String SOCKET_NAME = "voxmicsource";
 
     private final RecordService service;
@@ -33,9 +30,9 @@ public class RecordThread extends Thread {
             serverSocket = new LocalServerSocket(SOCKET_NAME);
         } catch (IOException e) {
             Log.e(App.TAG, "LocalServerSocket (bind)", e);
+            return;
         }
 
-        // Align: 480 frames = 960 bytes = 10.0ms at 48000Hz
         final int BLOCK_SIZE = 960;
         byte[] buf = new byte[BLOCK_SIZE];
 
@@ -44,37 +41,37 @@ public class RecordThread extends Thread {
 
             try (LocalSocket socket = serverSocket.accept()) {
                 if (Thread.currentThread().isInterrupted()) break;
+                Log.i(App.TAG, "accept() returned, client connected");
 
                 service.showNotificationEstablished();
                 recorder.startRecording();
+                Log.i(App.TAG, "startRecording() OK, state=" + recorder.getState());
 
+                mBlockCount = 0;
                 while (!Thread.currentThread().isInterrupted()) {
-                    long t1 = SystemClock.elapsedRealtimeNanos();
                     int totalRead = 0;
                     while (totalRead < BLOCK_SIZE) {
                         int r = recorder.read(buf, totalRead, BLOCK_SIZE - totalRead);
                         if (r < 0) break;
                         totalRead += r;
                     }
-                    long t2 = SystemClock.elapsedRealtimeNanos();
                     if (totalRead <= 0) break;
                     socket.getOutputStream().write(buf, 0, totalRead);
 
                     if (mBlockCount++ % 100 == 0) {
-                        float readMs = (float)(t2 - t1) * 1e-6f;
-                        Log.i(App.TAG, String.format("[Latency] read=%.1fms",
-                            readMs));
+                        Log.i(App.TAG, "blocks sent=" + mBlockCount);
                     }
                 }
             } catch (IOException e) {
                 Log.e(App.TAG, "LocalSocket", e);
             } finally {
-                recorder.stop();
+                try { recorder.stop(); } catch (Exception ignored) {}
+                Log.i(App.TAG, "connection closed, blocks sent=" + mBlockCount);
             }
         }
 
         try {
-            serverSocket.close();
+            if (serverSocket != null) serverSocket.close();
         } catch (IOException e) {
             Log.e(App.TAG, "LocalServerSocket (close)", e);
         }
@@ -82,6 +79,7 @@ public class RecordThread extends Thread {
 
     public void interrupt() {
         super.interrupt();
+        if (serverSocket == null) return;
         if (Build.VERSION.SDK_INT >= 21) {
             try {
                 Os.shutdown(serverSocket.getFileDescriptor(), 0);

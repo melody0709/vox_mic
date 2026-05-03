@@ -43,6 +43,14 @@ public class RecordService extends Service {
     private AcousticEchoCanceler mAec;
     private AutomaticGainControl mAgc;
 
+    private int mSampleRate;
+    private int mChannelConfig;
+    private int mAudioEncoding;
+    private int mMinBufSize;
+    private boolean mNsEnabled;
+    private boolean mAecEnabled;
+    private boolean mAgcEnabled;
+
     public static void start(Context context, boolean ns, boolean aec, boolean agc) {
         Intent intent = new Intent(context, RecordService.class)
                 .setAction(ACTION_RECORD)
@@ -83,56 +91,26 @@ public class RecordService extends Service {
             return START_NOT_STICKY;
         }
 
-        boolean nsEnabled = intent.getBooleanExtra(EXTRA_NS, true);
-        boolean aecEnabled = intent.getBooleanExtra(EXTRA_AEC, true);
-        boolean agcEnabled = intent.getBooleanExtra(EXTRA_AGC, true);
+        mNsEnabled = intent.getBooleanExtra(EXTRA_NS, true);
+        mAecEnabled = intent.getBooleanExtra(EXTRA_AEC, true);
+        mAgcEnabled = intent.getBooleanExtra(EXTRA_AGC, true);
 
-        int minBufSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_ENCODING);
-        if (minBufSize <= 0) {
+        mSampleRate = SAMPLE_RATE;
+        mChannelConfig = CHANNEL_CONFIG;
+        mAudioEncoding = AUDIO_ENCODING;
+
+        mMinBufSize = AudioRecord.getMinBufferSize(mSampleRate, mChannelConfig, mAudioEncoding);
+        if (mMinBufSize <= 0) {
             Log.e(App.TAG, "getMinBufferSize failed for 48000Hz, trying 44100Hz");
-            minBufSize = AudioRecord.getMinBufferSize(44100, CHANNEL_CONFIG, AUDIO_ENCODING);
+            mSampleRate = 44100;
+            mMinBufSize = AudioRecord.getMinBufferSize(mSampleRate, mChannelConfig, mAudioEncoding);
         }
 
-        AudioRecord recorder = new AudioRecord(
-                MediaRecorder.AudioSource.DEFAULT,
-                SAMPLE_RATE,
-                CHANNEL_CONFIG,
-                AUDIO_ENCODING,
-                1 * minBufSize);
-
-        if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+        AudioRecord recorder = createRecorder();
+        if (recorder == null) {
             Log.e(App.TAG, "Failed to initialize AudioRecord");
             stopSelf();
             return START_NOT_STICKY;
-        }
-
-        int sessionId = recorder.getAudioSessionId();
-        if (NoiseSuppressor.isAvailable() && nsEnabled) {
-            mNoiseSuppressor = NoiseSuppressor.create(sessionId);
-            if (mNoiseSuppressor != null) {
-                mNoiseSuppressor.setEnabled(true);
-                Log.i(App.TAG, "NoiseSuppressor enabled");
-            }
-        } else {
-            Log.i(App.TAG, "NoiseSuppressor " + (nsEnabled ? "not available" : "disabled"));
-        }
-        if (AcousticEchoCanceler.isAvailable() && aecEnabled) {
-            mAec = AcousticEchoCanceler.create(sessionId);
-            if (mAec != null) {
-                mAec.setEnabled(true);
-                Log.i(App.TAG, "AcousticEchoCanceler enabled");
-            }
-        } else {
-            Log.i(App.TAG, "AcousticEchoCanceler " + (aecEnabled ? "not available" : "disabled"));
-        }
-        if (AutomaticGainControl.isAvailable() && agcEnabled) {
-            mAgc = AutomaticGainControl.create(sessionId);
-            if (mAgc != null) {
-                mAgc.setEnabled(true);
-                Log.i(App.TAG, "AutomaticGainControl enabled");
-            }
-        } else {
-            Log.i(App.TAG, "AutomaticGainControl " + (agcEnabled ? "not available" : "disabled"));
         }
 
         recorderThread = new RecordThread(this, recorder);
@@ -145,6 +123,54 @@ public class RecordService extends Service {
         return null;
     }
 
+    protected AudioRecord createRecorder() {
+        releaseAudioEffects();
+
+        AudioRecord recorder = new AudioRecord(
+                MediaRecorder.AudioSource.DEFAULT,
+                mSampleRate,
+                mChannelConfig,
+                mAudioEncoding,
+                1 * mMinBufSize);
+
+        if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+            Log.e(App.TAG, "AudioRecord STATE_INITIALIZED failed");
+            recorder.release();
+            return null;
+        }
+
+        int sessionId = recorder.getAudioSessionId();
+        if (NoiseSuppressor.isAvailable() && mNsEnabled) {
+            mNoiseSuppressor = NoiseSuppressor.create(sessionId);
+            if (mNoiseSuppressor != null) {
+                mNoiseSuppressor.setEnabled(true);
+                Log.i(App.TAG, "NoiseSuppressor enabled");
+            }
+        }
+        if (AcousticEchoCanceler.isAvailable() && mAecEnabled) {
+            mAec = AcousticEchoCanceler.create(sessionId);
+            if (mAec != null) {
+                mAec.setEnabled(true);
+                Log.i(App.TAG, "AcousticEchoCanceler enabled");
+            }
+        }
+        if (AutomaticGainControl.isAvailable() && mAgcEnabled) {
+            mAgc = AutomaticGainControl.create(sessionId);
+            if (mAgc != null) {
+                mAgc.setEnabled(true);
+                Log.i(App.TAG, "AutomaticGainControl enabled");
+            }
+        }
+
+        return recorder;
+    }
+
+    private void releaseAudioEffects() {
+        if (mNoiseSuppressor != null) { mNoiseSuppressor.release(); mNoiseSuppressor = null; }
+        if (mAec != null) { mAec.release(); mAec = null; }
+        if (mAgc != null) { mAgc.release(); mAgc = null; }
+    }
+
     @Override
     public void onDestroy() {
         if (recorderThread != null) {
@@ -153,9 +179,7 @@ public class RecordService extends Service {
             catch (InterruptedException e) { Log.e(App.TAG, "RecordThread.join", e); }
             recorderThread = null;
         }
-        if (mNoiseSuppressor != null) { mNoiseSuppressor.release(); mNoiseSuppressor = null; }
-        if (mAec != null) { mAec.release(); mAec = null; }
-        if (mAgc != null) { mAgc.release(); mAgc = null; }
+        releaseAudioEffects();
         stopForeground(true);
     }
 

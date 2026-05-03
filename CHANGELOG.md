@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.5.3 (2026-05-03)
+
+### scrcpy 开关后 ADB forward 丢失自动恢复
+
+#### Bug 修复
+
+| Bug | 描述 | 修复 |
+|-----|------|------|
+| **scrcpy 关闭后无法恢复** | scrcpy 关闭时清理 ADB forward (`tcp:27183`)，导致 bridge connect 10061，需重启 vox_mic | 第 1 次 connect 失败且之前成功过 → `refreshForward()` 快速重建 forward（~100ms）→ 重试成功 |
+| **3 次快速断开无恢复** | socket 连接后 <3 秒断开反复发生，无自动修复 | quick disconnect 计数 ≥ 3 → `setupAudioSource()` 完整重建（重启 app + forward） |
+
+#### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/adb_control.h` | 新增 `refreshForward()` 声明 |
+| `src/adb_control.cpp` | 实现 `refreshForward()` = `removeForward` + `createForward`（~100ms） |
+| `src/main.cpp` | bridge 连接失败检测：`connectFailCount` + `wasPreviouslyConnected`；第 1 次失败调用 `refreshForward`；3 次失败调用 `setupAudioSource`；quick disconnect 检测 |
+| `RecordService.java` | 提取 `createRecorder()` 工厂方法 + `releaseAudioEffects()` 辅助方法 |
+| `RecordThread.java` | 诊断日志（accept/recorder state/blocks sent/connection closed） |
+
+#### 恢复延迟对比
+
+| 场景 | v0.5.2 | v0.5.3 |
+|------|--------|--------|
+| scrcpy 后第 1 次语音输入 | 3-5 秒（3 次失败 + 1.5s 重建） | ~300ms（1 次失败 + 100ms 刷新 + 重试） |
+| 正常 idle 恢复 | 无变化 | 无变化 |
+
+---
+
 ## v0.5.2 (2026-05-03)
 
 ### Phase 12: RNNoise 降噪强度可调 + Hint 样式优化

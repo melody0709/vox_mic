@@ -1,4 +1,4 @@
-# 架构说明 — v0.5.2
+# 架构说明 — v0.5.3
 
 ## 数据流
 
@@ -46,9 +46,9 @@ audiosource.exe
 | `device_enum.h/cpp` | WASAPI 设备枚举，VB-CABLE 查找 |
 | `ring_buffer.h` | 无锁 SPSC 环形缓冲区 |
 | `socket_client.h/cpp` | Winsock2 TCP 客户端 (含 waitForData) |
-| `adb_control.h/cpp` | ADB 命令、设备检测、App 启动、端口转发 (**CreateProcess + CREATE_NO_WINDOW**，无闪烁) |
+| `adb_control.h/cpp` | ADB 命令、设备检测、App 启动、端口转发、**forward 快速刷新** (**CreateProcess + CREATE_NO_WINDOW**，无闪烁) |
 | `tray_icon.h/cpp` | 系统托盘 + 右键菜单 (含灰度版本号) |
-| `config.h/cpp` | 注册表持久化 (**20 字段**) |
+| `config.h/cpp` | config.ini 持久化 (**21 字段**) |
 | `settings_dialog.h/cpp` | **主窗口** GUI (设备/网络/App/音效/DSP/Debug，非模态持久窗口) |
 | **`mic_usage_monitor.h/cpp`** | Phase 3+8: 事件驱动 (IAudioSessionNotification + IAudioSessionEvents) |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |

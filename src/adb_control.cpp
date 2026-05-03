@@ -105,6 +105,19 @@ bool ADBControl::removeForward(int port) {
     return true;
 }
 
+bool ADBControl::refreshForward(int port, const std::string& remoteSocket) {
+    removeForward(port);
+    std::string cmd = "adb";
+    if (!m_serial.empty()) {
+        cmd += " -s " + m_serial;
+    }
+    cmd += " forward tcp:" + std::to_string(port) + " " + remoteSocket;
+    runCommandNoWindow(cmd);
+    printf("ADB forward refreshed: tcp:%d -> %s\n", port, remoteSocket.c_str());
+    fflush(stdout);
+    return true;
+}
+
 bool ADBControl::init(const std::string& preferredSerial) {
     if (!isADBExists()) {
         printf("ERROR: adb not found. Install Android Platform Tools and make sure adb is in PATH.\n");

@@ -1,4 +1,4 @@
-# AGENTS.md — v0.5.2
+# AGENTS.md — v0.5.3
 
 将 Android 手机麦克风用作 Windows 系统麦克风，ADB + VB-CABLE + Raw WASAPI。按需激活：有应用使用 CABLE Output 时才推流，空闲不走 DSP。
 
@@ -103,7 +103,7 @@ render:    ring buffer pop → int16→float → DspPipeline → WASAPI write
 | RING_BUFFER_BLOCKS | 128 | `wasapi_output.h:17` |
 | WASAPI 缓冲 | ~22ms (共享模式下限) | `wasapi_output.cpp:73` |
 | 环形水位 | 3→2 | `main.cpp` |
-| Android AudioRecord | 1× minBufSize | `RecordService.java:101` |
+| Android AudioRecord | 1× minBufSize | `RecordService.java` |
 | 总延迟 | ~40ms | |
 
 ### 按需激活

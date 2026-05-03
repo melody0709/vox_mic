@@ -1,4 +1,4 @@
-# AudioSource Win (Raw WASAPI) v0.5.2
+# AudioSource Win (Raw WASAPI) v0.5.3
 
 将 Android 手机麦克风用作 Windows 系统麦克风，通过 ADB + VB-CABLE + Raw WASAPI 实现。支持按需激活：有 Windows 应用使用 CABLE Output 时才推流，空闲时不走 DSP。
 
@@ -60,7 +60,7 @@ build.bat
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r app\build\outputs\apk\debug\app-debug.apk
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.5.3.apk"
 ```
 
 ## 性能

@@ -154,6 +154,11 @@ void audioBridgeThread() {
            g_config.compressorEnabled);
     fflush(stdout);
 
+    int quickDisconnectCount = 0;
+    int connectFailCount = 0;
+    bool wasPreviouslyConnected = false;
+    uint64_t connectTick = 0;
+
     while (g_running.load()) {
         if (!g_bridgeActive.load()) {
             Sleep(200);
@@ -172,13 +177,31 @@ void audioBridgeThread() {
             QueryPerformanceFrequency(&qpcFreq);
             QueryPerformanceCounter(&t0);
             if (!socketClient.connect(host, port)) {
+                connectFailCount++;
+                printf("[Bridge] connect fail #%d\n", connectFailCount);
+                fflush(stdout);
+                if (connectFailCount == 1 && wasPreviouslyConnected) {
+                    printf("[Bridge] first fail after connection, refreshing ADB forward\n");
+                    fflush(stdout);
+                    std::string remoteSocket = "localabstract:" + androidSocket;
+                    adb.refreshForward(port, remoteSocket);
+                }
+                if (connectFailCount >= 3) {
+                    printf("[Bridge] 3 consecutive connect fails, full reset\n");
+                    fflush(stdout);
+                    adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc);
+                    connectFailCount = 0;
+                }
                 Sleep(200);
                 continue;
             }
+            connectFailCount = 0;
+            wasPreviouslyConnected = true;
             QueryPerformanceCounter(&t1);
             double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)qpcFreq.QuadPart;
             printf("Socket connected (%.2fms)\n", ms);
             fflush(stdout);
+            connectTick = GetTickCount64();
             g_streaming.store(true);
             g_micStreaming.store(true);
             if (g_trayIcon) {
@@ -281,6 +304,27 @@ void audioBridgeThread() {
         g_micStreaming.store(false);
         if (g_trayIcon) {
             g_trayIcon->updateIcon(false, false);
+        }
+        printf("[Bridge] inner loop exited, will retry outer loop\n");
+        fflush(stdout);
+
+        if (connectTick > 0) {
+            uint64_t elapsed = GetTickCount64() - connectTick;
+            if (elapsed < 3000) {
+                quickDisconnectCount++;
+                printf("Quick disconnect (%llums), count=%d\n",
+                       (unsigned long long)elapsed, quickDisconnectCount);
+            } else {
+                quickDisconnectCount = 0;
+            }
+            connectTick = 0;
+        }
+
+        if (quickDisconnectCount >= 3) {
+            printf("3 consecutive quick disconnects, restarting Android app\n");
+            fflush(stdout);
+            adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc);
+            quickDisconnectCount = 0;
         }
     }
 

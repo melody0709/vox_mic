@@ -18,6 +18,7 @@ public:
     bool startApp(const std::string& component, bool ns, bool aec, bool agc);
     bool createForward(int port, const std::string& remoteSocket);
     bool removeForward(int port);
+    bool refreshForward(int port, const std::string& remoteSocket);
 
 private:
     std::string m_serial;

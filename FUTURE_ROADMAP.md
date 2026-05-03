@@ -1,4 +1,4 @@
-# 未来路线图 — v0.5.2+
+# 未来路线图 — v0.5.3+
 
 ## 已完成 ✅
 
@@ -37,6 +37,11 @@
   - 按需重连: socket connect ~0.3-0.8ms (QPC 实测)
   - 冷启动延迟 ~200ms (Sleep 200ms 轮询为主)
   - Android 端无需改动
+- ✅ **scrcpy 开关后 ADB forward 自动恢复** (v0.5.3)
+  - scrcpy 关闭时会清理 ADB forward，导致 bridge connect 10061
+  - 第 1 次 connect 失败且之前成功过 → `refreshForward()` 快速重建 forward（~100ms）→ 重试成功
+  - 连续 3 次失败 → `setupAudioSource()` 完整重建（重启 app + forward）
+  - 恢复延迟 ~300ms（从 v0.5.2 的 3-5 秒改善）
 
 ## 后续 Phase
 
@@ -65,4 +70,5 @@
 | ~~10~~ | ~~隐藏到托盘 GUI~~ | ✅ v0.4.1 |
 | ~~11~~ | ~~CPU 优化 + 事件驱动 Monitor~~ | ✅ v0.4.2 |
 | ~~12~~ | ~~Socket 按需连接~~ | ✅ v0.5.0 |
-| 13 | 自定义图标 | 1h | — |
+| ~~13~~ | ~~scrcpy forward 自动恢复~~ | ✅ v0.5.3 |
+| 14 | 自定义图标 | 1h | — |
