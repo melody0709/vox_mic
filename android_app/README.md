@@ -1,52 +1,54 @@
 # VoxMic Source — Android App
 
-基于 [gdzx/audiosource](https://github.com/gdzx/audiosource) 修改的高音质版本。
+[简体中文](../doc/zh-CN/android_app/README.md) | **English**
 
-## 改动
+A high-quality version modified from [gdzx/audiosource](https://github.com/gdzx/audiosource).
 
-| 项 | 原始 | VoxMic |
-|----|------|--------|
-| 包名 | `fr.dzx.audiosource` | `com.voxmic.source` |
-| 应用名 | Audio Source | VoxMic Source |
-| Socket 名 | `audiosource` | `voxmicsource` |
-| AudioSource | `DEFAULT` | `VOICE_COMMUNICATION` (硬件降噪+AEC+AGC) |
-| NoiseSuppressor | 无 | 启用 |
-| AcousticEchoCanceler | 无 | 启用 |
-| AutomaticGainControl | 无 | 启用 |
-| 采样率 | 44100 Hz | 48000 Hz |
-| 块大小 | ~661 字节 | 2048 字节 (与 Windows BLOCK_SIZE 对齐) |
+## Changes
 
-## 构建
+| Item | Original | VoxMic |
+|------|----------|--------|
+| Package name | `fr.dzx.audiosource` | `com.voxmic.source` |
+| App name | Audio Source | VoxMic Source |
+| Socket name | `audiosource` | `voxmicsource` |
+| AudioSource | `DEFAULT` | `VOICE_COMMUNICATION` (hardware NR+AEC+AGC) |
+| NoiseSuppressor | None | Enabled |
+| AcousticEchoCanceler | None | Enabled |
+| AutomaticGainControl | None | Enabled |
+| Sample rate | 44100 Hz | 48000 Hz |
+| Block size | ~661 bytes | 2048 bytes (aligned with Windows BLOCK_SIZE) |
 
-需要 Android SDK (API 34) 和 Gradle。
+## Build
 
-### 方式 1: Android Studio
+Requires Android SDK (API 34) and Gradle.
 
-1. 用 Android Studio 打开 `android_app/` 目录
+### Option 1: Android Studio
+
+1. Open the `android_app/` directory in Android Studio
 2. Build → Build APK
-3. 安装到手机
+3. Install on phone
 
-### 方式 2: 命令行
+### Option 2: Command Line
 
 ```bash
 cd android_app
 ./gradlew assembleDebug
-# APK 输出: app/build/outputs/apk/debug/app-debug.apk
+# APK output: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### 方式 3: 生成 Gradle Wrapper
+### Option 3: Generate Gradle Wrapper
 
 ```bash
 cd android_app
 gradle wrapper --gradle-version 8.2
 ```
 
-## 图标
+## Icons
 
-`ic_launcher` 和 `ic_launcher_round` 需要放在 `app/src/main/res/mipmap-*/` 下。
-可从原始 audiosource 项目复制，或使用 Android Studio 的 Image Asset 工具生成。
+`ic_launcher` and `ic_launcher_round` need to be placed in `app/src/main/res/mipmap-*/`.
+You can copy them from the original audiosource project, or generate them using Android Studio's Image Asset tool.
 
-## 与原版共存
+## Coexistence with Original
 
-本 App 的包名和应用名完全不同，可与原版 `gdzx/audiosource` 同时安装在同一设备上。
-Windows 端可通过 Settings 对话框中切换 App 来 A/B 对比音质。
+This app has a completely different package name and app name, and can coexist with the original `gdzx/audiosource` on the same device.
+The Windows side can switch between apps in the Settings dialog for A/B audio quality comparison.
