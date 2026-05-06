@@ -9,8 +9,6 @@
 #define WM_TRAYICON (WM_USER + 1)
 #define ID_TRAYICON 1
 
-#define ID_MENU_START        1001
-#define ID_MENU_STOP         1002
 #define ID_MENU_DEMAND_MODE  1005
 #define ID_MENU_ALWAYS_HOT   1006
 #define ID_MENU_SETTINGS     1003
@@ -29,8 +27,6 @@ public:
     void setDemandMode(bool on);
     void setAlwaysHot(bool on);
 
-    std::function<void()> onStart;
-    std::function<void()> onStop;
     std::function<void()> onExit;
 
 private:

@@ -11,7 +11,6 @@
 
 extern Config g_config;
 extern std::atomic<bool> g_running;
-extern std::atomic<bool> g_bridgeActive;
 extern std::atomic<bool> g_demandMode;
 extern std::atomic<bool> g_alwaysHot;
 extern TrayIcon* g_trayIcon;
@@ -549,12 +548,6 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             ShowWindow(hWnd, SW_HIDE);
             break;
 
-        case ID_MENU_START:
-            g_bridgeActive.store(true);
-            break;
-        case ID_MENU_STOP:
-            g_bridgeActive.store(false);
-            break;
         case ID_MENU_DEMAND_MODE: {
             bool newVal = !g_demandMode.load();
             g_demandMode.store(newVal);

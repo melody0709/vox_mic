@@ -19,7 +19,6 @@
 
 Config g_config;
 std::atomic<bool> g_running{true};
-std::atomic<bool> g_bridgeActive{true};
 static std::atomic<bool> g_streaming{false};
 std::atomic<float> g_gain{1.5f};
 std::atomic<bool> g_eqEnabled{true};
@@ -125,10 +124,6 @@ void audioBridgeThread() {
     bool agc = g_config.agcEnabled;
     syncDspAtomsFromConfig();
 
-    while (g_running.load() && !g_bridgeActive.load()) {
-        Sleep(200);
-    }
-
     if (!g_running.load()) return;
 
     while (g_running.load()) {
@@ -160,11 +155,6 @@ void audioBridgeThread() {
     uint64_t connectTick = 0;
 
     while (g_running.load()) {
-        if (!g_bridgeActive.load()) {
-            Sleep(200);
-            continue;
-        }
-
         if (!g_alwaysHot.load(std::memory_order_relaxed) &&
             g_demandMode.load(std::memory_order_relaxed) &&
             !g_micRequested.load(std::memory_order_relaxed)) {
@@ -215,7 +205,7 @@ void audioBridgeThread() {
         int staleCount = 0;
         bool wasIdle = true;
 
-        while (g_running.load() && g_bridgeActive.load()) {
+        while (g_running.load()) {
             if (!socketClient.isConnected()) break;
 
             if (!socketClient.waitForData(100)) {
@@ -443,7 +433,6 @@ int main(int argc, char* argv[]) {
     printf("\nShutting down...\n");
     fflush(stdout);
 
-    g_bridgeActive.store(false);
     g_running.store(false);
     if (bridge.joinable()) bridge.join();
     if (g_monitorThread.joinable()) g_monitorThread.join();

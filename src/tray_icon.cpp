@@ -23,8 +23,6 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     strcpy_s(m_nid.szTip, "VoxMic - Idle");
 
     m_hMenu = CreatePopupMenu();
-    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_START, "Start Bridge");
-    AppendMenuA(m_hMenu, MF_STRING, ID_MENU_STOP, "Stop Bridge");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_DEMAND_MODE, "Demand Mode");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_ALWAYS_HOT, "Always Hot");
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_SETTINGS, "Settings");
