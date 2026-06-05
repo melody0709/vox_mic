@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2C313C" />
+      <stop offset="100%" stop-color="#181A1F" />
+    </linearGradient>
+    
+    <!-- 主体专用的绿色渐变：略深于声波以增加层次 -->
+    <linearGradient id="mic-active-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+
+    <!-- 声波和指示灯的高亮绿 -->
+    <linearGradient id="active-wave-green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#10B981" />
+    </linearGradient>
+
+    <filter id="super-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    
+    <filter id="drop-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg-grad)" stroke="#3F4452" stroke-width="2" />
+
+  <!-- 底部霓虹背景光 -->
+  <circle cx="128" cy="200" r="60" fill="#059669" filter="url(#super-glow)" opacity="0.5"/>
+
+  <g filter="url(#drop-shadow)">
+    <!-- 托架保持金属质感作为支撑 -->
+    <path d="M 43 145 A 85 85 0 0 0 213 145" fill="none" stroke="#64748B" stroke-width="18" stroke-linecap="round" />
+    
+    <!-- 巨大化拾音头：填充改为绿色渐变 -->
+    <rect x="73" y="55" width="110" height="165" rx="55" fill="url(#mic-active-green)" />
+    
+    <!-- 纹理线改为深绿以保持识别度 -->
+    <line x1="100" y1="100" x2="156" y2="100" stroke="#064E3B" stroke-width="10" stroke-linecap="round" opacity="0.8" />
+    <line x1="100" y1="135" x2="156" y2="135" stroke="#064E3B" stroke-width="10" stroke-linecap="round" opacity="0.8" />
+    <line x1="100" y1="170" x2="156" y2="170" stroke="#064E3B" stroke-width="10" stroke-linecap="round" opacity="0.8" />
+  </g>
+
+  <!-- 强化声波与指示灯 -->
+  <g filter="url(#super-glow)">
+    <path d="M 40 85 Q 5 138 40 191" fill="none" stroke="url(#active-wave-green)" stroke-width="14" stroke-linecap="round" />
+    <path d="M 22 75 Q -8 138 22 201" fill="none" stroke="url(#active-wave-green)" stroke-width="6" stroke-linecap="round" opacity="0.4"/>
+    
+    <path d="M 216 85 Q 251 138 216 191" fill="none" stroke="url(#active-wave-green)" stroke-width="14" stroke-linecap="round" />
+    <path d="M 234 75 Q 264 138 234 201" fill="none" stroke="url(#active-wave-green)" stroke-width="6" stroke-linecap="round" opacity="0.4"/>
+    
+    <circle cx="212" cy="48" r="18" fill="#10B981" />
+  </g>
+</svg>

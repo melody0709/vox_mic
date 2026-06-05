@@ -1,0 +1,25 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="256" height="256" rx="55" fill="#111820" />
+
+  <rect x="88" y="65" width="80" height="135" rx="40" fill="#b0b8c3" />
+
+  <rect x="106" y="105" width="44" height="6" rx="3" fill="#6c7a89" />
+  <rect x="106" y="125" width="44" height="6" rx="3" fill="#6c7a89" />
+  <rect x="106" y="145" width="44" height="6" rx="3" fill="#6c7a89" />
+
+  <circle cx="210" cy="46" r="14" fill="#00c08b" />
+
+  <path d="M45,150 C45,210 100,230 128,230 C156,230 211,210 211,150" 
+        fill="none" 
+        stroke="#00c08b" 
+        stroke-width="18" 
+        stroke-linecap="round" 
+        filter="url(#glow)" />
+</svg>
