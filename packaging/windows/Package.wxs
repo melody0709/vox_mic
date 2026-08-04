@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?include ProductIdentity.wxi ?>
+  <?include "$(var.GeneratedWixDirectory)\ProductInstance.generated.wxi" ?>
+
+  <Package
+      Name="VoxMic"
+      Manufacturer="melody0709"
+      Version="$(var.VoxMicProductVersion)"
+      ProductCode="$(var.VoxMicProductCode)"
+      UpgradeCode="$(var.VoxMicUpgradeCode)"
+      Scope="perMachine"
+      InstallerVersion="500"
+      Compressed="yes">
+    <!-- Keep removal transactional so a failed upgrade can roll back to N-1. -->
+    <MajorUpgrade
+        Schedule="afterInstallInitialize"
+        AllowSameVersionUpgrades="no"
+        DowngradeErrorMessage="A newer version of VoxMic is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <UIRef Id="VoxMicInstallerUi" />
+    <Property Id="VOXMIC_INSTALLER_INPUT_SHA256" Value="$(var.VoxMicInstallerInputSha256)" />
+
+    <!--
+      Restore the directory selected by the preceding MSI before
+      RemoveExistingProducts. On a fresh install INSTALLFOLDER defaults to
+      Program Files\VoxMic through the directory tree below.
+    -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch
+          Id="SearchVoxMicInstallFolder"
+          Root="HKLM"
+          Key="Software\VoxMic"
+          Name="InstallFolder"
+          Type="raw"
+          Bitness="always64" />
+    </Property>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="VoxMic">
+        <Component
+            Id="cmp_VoxMicInstallFolderRegistry"
+            Guid="$(var.VoxMicInstallFolderRegistryComponentGuid)"
+            Bitness="always64">
+          <RegistryValue
+              Root="HKLM"
+              Key="Software\VoxMic"
+              Name="InstallFolder"
+              Type="string"
+              Value="[INSTALLFOLDER]"
+              KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="VoxMicProgramMenuFolder" Name="VoxMic">
+        <Component
+            Id="cmp_VoxMicStartMenuShortcut"
+            Guid="$(var.VoxMicStartMenuShortcutComponentGuid)"
+            Bitness="always64">
+          <Shortcut
+              Id="VoxMicStartMenuShortcut"
+              Name="VoxMic"
+              Target="[INSTALLFOLDER]voxmic.exe"
+              WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveVoxMicProgramMenuFolder" On="uninstall" />
+          <RegistryValue
+              Root="HKCU"
+              Key="Software\VoxMic"
+              Name="StartMenuShortcut"
+              Type="integer"
+              Value="1"
+              KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="VoxMicFeature" Title="VoxMic" Level="1">
+      <ComponentGroupRef Id="VoxMicRuntimeFiles" />
+      <ComponentRef Id="cmp_VoxMicInstallFolderRegistry" />
+      <ComponentRef Id="cmp_VoxMicStartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

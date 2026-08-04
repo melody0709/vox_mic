@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Stable / x64 / per-machine MSI identity for VoxMic.
+  These values were created once before the first public MSI and are release
+  contract inputs. Do not regenerate or replace them in later releases.
+-->
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?define VoxMicProductLineKey = "stable|x64|perMachine" ?>
+  <?define VoxMicUpgradeCode = "BCD6404E-75C3-47AF-A16E-223633CBB8A7" ?>
+  <?define VoxMicProductCodeNamespace = "7643ED05-ADFC-4207-A2D0-12D52C7F9C29" ?>
+  <?define VoxMicComponentNamespace = "0ABD2E9B-5F96-4DB0-B19F-7D1B92412AC9" ?>
+</Include>

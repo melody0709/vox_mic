@@ -12,6 +12,7 @@
 #include "config.h"
 #include "settings_dialog.h"
 #include "mic_usage_monitor.h"
+#include "runtime_paths.h"
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 27183
@@ -484,6 +485,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    runtime_paths::MigrateLegacyConfigIfNeeded();
     g_config = Config::load();
     syncDspAtomsFromConfig();
     g_demandMode.store(g_config.demandMode, std::memory_order_relaxed);

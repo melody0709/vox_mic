@@ -1,6 +1,7 @@
 #include "settings_dialog.h"
 #include "adb_control.h"
 #include "tray_icon.h"
+#include "startup_registration.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -41,6 +42,8 @@ extern void syncDspAtomsFromConfig();
 #define IDC_CHECK_DEBUG       2022
 #define IDC_TRACKBAR_NRSTR    2023
 #define IDC_LABEL_NRSTR       2024
+#define IDC_CHECK_STARTUP     2025
+#define IDC_LABEL_STARTUP_HINT 2026
 
 struct SettingsDialogData {
     Config* pConfig;
@@ -232,6 +235,47 @@ static void saveUiToConfig(HWND hWnd, Config* cfg) {
         (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
 }
 
+// 每次打开设置都重新查注册表（注册表是唯一真相，不读缓存）。
+// 检测到「已注册但指向旧路径」（Portable 移动后）显示状态提示。
+static void refreshStartupRegistrationControl(HWND hWnd) {
+    HWND hCheck = GetDlgItem(hWnd, IDC_CHECK_STARTUP);
+    HWND hHint = GetDlgItem(hWnd, IDC_LABEL_STARTUP_HINT);
+    if (!hCheck || !hHint) return;
+
+    const StartupRegistrationState state = QueryVoxMicStartupRegistration();
+    SendMessageA(hCheck, BM_SETCHECK,
+        state.registered ? BST_CHECKED : BST_UNCHECKED, 0);
+
+    if (!state.Succeeded()) {
+        SetWindowTextA(hHint, "Unable to read startup registration from Windows.");
+        return;
+    }
+    if (state.registered && !state.pointsToCurrentExecutable) {
+        SetWindowTextA(hHint,
+            "Registered to a different location. Saving will update it to this copy.");
+        return;
+    }
+    SetWindowTextA(hHint,
+        "Uses your Windows account startup list. Moving a Portable copy is corrected when you save.");
+}
+
+// 事务性保存：注册表变更成功后才提交 config.ini 与 DSP 原子量。
+// 失败时弹 MessageBox、保留当前页面状态、返回 false。
+static bool saveStartupRegistrationControl(HWND hWnd) {
+    const bool enable = (SendMessageA(
+        GetDlgItem(hWnd, IDC_CHECK_STARTUP), BM_GETCHECK, 0, 0) == BST_CHECKED);
+    const DWORD result = SetVoxMicStartupRegistration(enable);
+    if (result == ERROR_SUCCESS) return true;
+
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "Failed to update Windows startup registration (error %lu).",
+        static_cast<unsigned long>(result));
+    MessageBoxA(hWnd, buf, "VoxMic - Startup", MB_OK | MB_ICONWARNING);
+    refreshStartupRegistrationControl(hWnd);
+    return false;
+}
+
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
 
@@ -363,6 +407,20 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
             xMargin, yBase, 200, 22, hWnd, (HMENU)IDC_CHECK_DEBUG, hInst, NULL));
 
+        yBase += 32;
+
+        addGen(CreateWindowExA(0, "BUTTON", "Start VoxMic when I sign in to Windows",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+            xMargin, yBase, 420, 22, hWnd, (HMENU)IDC_CHECK_STARTUP, hInst, NULL));
+
+        yBase += 24;
+
+        HWND hStartupHint = addGen(CreateWindowExA(0, "STATIC",
+            "Uses your Windows account startup list. Moving a Portable copy is corrected when you save.",
+            WS_CHILD | WS_VISIBLE,
+            xMargin + 20, yBase, 420, 16, hWnd, (HMENU)IDC_LABEL_STARTUP_HINT, hInst, NULL));
+        pData->hintControls.push_back(hStartupHint);
+
         // --- DSP Tab Controls ---
         yBase = 55;
 
@@ -474,8 +532,15 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         refreshDeviceList(hCombo, cfg->serial);
 
+        refreshStartupRegistrationControl(hWnd);
+
         return 0;
     }
+
+    case WM_SHOWWINDOW:
+        // 每次显示都重新查注册表（Portable 移动后旧值失效会被识别）。
+        if (wParam) refreshStartupRegistrationControl(hWnd);
+        return 0;
 
     case WM_TRAYICON:
         if (lParam == WM_LBUTTONUP) {
@@ -538,6 +603,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             break;
         }
         case IDC_BTN_OK:
+            // 事务性保存：开机自启注册表变更成功后才提交 config.ini 与 DSP 原子量。
+            if (!saveStartupRegistrationControl(hWnd)) return 0;
             saveUiToConfig(hWnd, pData->pConfig);
             pData->pConfig->save();
             syncDspAtomsFromConfig();

@@ -1,4 +1,5 @@
 #include "config.h"
+#include "runtime_paths.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <cstdio>
@@ -7,15 +8,21 @@
 #define INI_SECTION "VoxMic"
 
 static std::string getIniPath() {
-    char exePath[MAX_PATH];
-    GetModuleFileNameA(NULL, exePath, MAX_PATH);
-    std::string path(exePath);
-    size_t pos = path.find_last_of("\\/");
-    if (pos != std::string::npos) {
-        path = path.substr(0, pos + 1);
+    std::wstring wide = runtime_paths::ConfigPath();
+    if (wide.empty()) {
+        char exePath[MAX_PATH];
+        GetModuleFileNameA(NULL, exePath, MAX_PATH);
+        std::string path(exePath);
+        size_t pos = path.find_last_of("\\/");
+        if (pos != std::string::npos) path = path.substr(0, pos + 1);
+        path += "config.ini";
+        return path;
     }
-    path += "config.ini";
-    return path;
+    int len = WideCharToMultiByte(CP_ACP, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string narrow(len > 0 ? len : 1, '\0');
+    if (len > 0) WideCharToMultiByte(CP_ACP, 0, wide.c_str(), -1, &narrow[0], len, nullptr, nullptr);
+    if (!narrow.empty() && narrow.back() == '\0') narrow.pop_back();
+    return narrow;
 }
 
 static std::string readIniString(const char* path, const char* key, const char* def) {
