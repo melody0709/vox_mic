@@ -10,6 +10,9 @@
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
 
+extern std::atomic<bool> g_micRequested;
+extern std::atomic<bool> g_demandMode;
+
 WASAPIOutput::WASAPIOutput() {}
 
 WASAPIOutput::~WASAPIOutput() {
@@ -241,7 +244,13 @@ void WASAPIOutput::renderThread() {
                 }
             } else {
                 memset(pData, 0, outBlockSize);
-                underruns.fetch_add(1, std::memory_order_relaxed);
+                bool expectAudio = !g_demandMode.load(std::memory_order_relaxed) ||
+                                   g_micRequested.load(std::memory_order_relaxed);
+                if (expectAudio) {
+                    underruns.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    idleSilenceBlocks.fetch_add(1, std::memory_order_relaxed);
+                }
             }
 
             m_pRenderClient->ReleaseBuffer(outFrames, 0);

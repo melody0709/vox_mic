@@ -28,6 +28,7 @@ public:
     SPSCRingBuffer* getRingBuffer() { return &m_ringBuffer; }
 
     std::atomic<int> underruns{0};
+    std::atomic<int> idleSilenceBlocks{0};
     std::atomic<int> receivedBlocks{0};
     std::atomic<int> droppedBlocks{0};
     std::atomic<double> procUsEma{0};

@@ -16,6 +16,10 @@
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 27183
 #define STATS_INTERVAL_MS 5000
+#define IDLE_HEALTH_CHECK_MS 15000
+#define ADB_LOST_RETRY_MIN_MS 1000
+#define ADB_LOST_RETRY_MAX_MS 3000
+#define ADB_LOST_LOG_MS 30000
 
 Config g_config;
 std::atomic<bool> g_running{true};
@@ -37,6 +41,36 @@ static std::thread g_monitorThread;
 static WASAPIOutput* g_wasapiOutput{nullptr};
 TrayIcon* g_trayIcon{nullptr};
 static HINSTANCE g_hInstance{nullptr};
+
+enum class BridgeRecoveryState {
+    Healthy,
+    AdbLost,
+    Recovering
+};
+
+enum BridgeStatus {
+    BRIDGE_STARTING = 0,
+    BRIDGE_IDLE_SLEEP,
+    BRIDGE_IDLE_HOT,
+    BRIDGE_STREAMING,
+    BRIDGE_ADB_LOST,
+    BRIDGE_RECOVERING
+};
+
+static std::atomic<int> g_bridgeStatus{BRIDGE_STARTING};
+
+static const char* bridgeStatusName(int status) {
+    switch (status) {
+    case BRIDGE_IDLE_SLEEP: return "idle-sleep";
+    case BRIDGE_IDLE_HOT: return "idle-hot";
+    case BRIDGE_STREAMING: return "streaming";
+    case BRIDGE_ADB_LOST: return "adb-lost";
+    case BRIDGE_RECOVERING: return "recovering";
+    case BRIDGE_STARTING:
+    default:
+        return "starting";
+    }
+}
 
 void syncDspAtomsFromConfig() {
     g_gain.store(g_config.gain, std::memory_order_relaxed);
@@ -64,10 +98,12 @@ static void setConsoleVisible(bool visible) {
 
 VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
-    printf("[Stats] recv=%d drop=%d underrun=%d queue=%zu proc=%.0fus lat=%.1fms\n",
+    printf("[Stats] state=%s recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu proc=%.0fus lat=%.1fms\n",
+        bridgeStatusName(g_bridgeStatus.load(std::memory_order_relaxed)),
         g_wasapiOutput->receivedBlocks.load(),
         g_wasapiOutput->droppedBlocks.load(),
         g_wasapiOutput->underruns.load(),
+        g_wasapiOutput->idleSilenceBlocks.load(),
         g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE),
         g_wasapiOutput->procUsEma.load(),
         g_wasapiOutput->estLatencyMs.load());
@@ -119,6 +155,7 @@ void audioBridgeThread() {
     int port = g_config.port;
     std::string androidComponent = g_config.androidComponent;
     std::string androidSocket = g_config.androidSocket;
+    std::string remoteSocket = "localabstract:" + androidSocket;
     bool ns = g_config.nsEnabled;
     bool aec = g_config.aecEnabled;
     bool agc = g_config.agcEnabled;
@@ -131,14 +168,14 @@ void audioBridgeThread() {
             Sleep(2000);
             continue;
         }
-        if (!adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc)) {
+        if (!adb.setupAudioSource(androidComponent, androidSocket, port, ns, aec, agc)) {
             Sleep(2000);
             continue;
         }
         break;
     }
 
-    if (!g_running.load()) { adb.cleanup(); return; }
+    if (!g_running.load()) { adb.cleanup(port); return; }
     printf("ADB ready, entering Always Hot mode\n");
     printf("Settings:\n");
     printf("  Gain = %.2fx\n", g_config.gain);
@@ -148,16 +185,111 @@ void audioBridgeThread() {
            g_config.eqPresence, g_config.eqBassCut,
            g_config.compressorEnabled);
     fflush(stdout);
+    g_bridgeStatus.store(BRIDGE_IDLE_SLEEP, std::memory_order_relaxed);
 
     int quickDisconnectCount = 0;
     int connectFailCount = 0;
+    bool adbReadyOnce = true;
     bool wasPreviouslyConnected = false;
     uint64_t connectTick = 0;
+    BridgeRecoveryState recoveryState = BridgeRecoveryState::Healthy;
+    uint64_t nextIdleHealthTick = GetTickCount64() + IDLE_HEALTH_CHECK_MS;
+    uint64_t nextAdbCheckTick = 0;
+    uint64_t lastAdbLostLogTick = 0;
+    uint64_t adbLostDelayMs = ADB_LOST_RETRY_MIN_MS;
+
+    auto enterAdbLost = [&](const char* reason) {
+        uint64_t now = GetTickCount64();
+        if (recoveryState != BridgeRecoveryState::AdbLost) {
+            printf("[Bridge] ADB lost: %s\n", reason);
+            fflush(stdout);
+        }
+        recoveryState = BridgeRecoveryState::AdbLost;
+        g_bridgeStatus.store(BRIDGE_ADB_LOST, std::memory_order_relaxed);
+        nextAdbCheckTick = now + adbLostDelayMs;
+        lastAdbLostLogTick = now;
+        socketClient.disconnect();
+        g_streaming.store(false);
+        g_micStreaming.store(false);
+        if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+    };
+
+    auto recoverAdb = [&](const char* reason) -> bool {
+        printf("[Bridge] Recovering ADB: %s\n", reason);
+        fflush(stdout);
+        recoveryState = BridgeRecoveryState::Recovering;
+        g_bridgeStatus.store(BRIDGE_RECOVERING, std::memory_order_relaxed);
+
+        if (!adb.init(serial)) {
+            enterAdbLost("adb init failed during recovery");
+            return false;
+        }
+        if (!adb.setupAudioSource(androidComponent, androidSocket, port, ns, aec, agc)) {
+            enterAdbLost("setupAudioSource failed during recovery");
+            return false;
+        }
+        if (!adb.verifyForward(port, remoteSocket)) {
+            enterAdbLost("forward verification failed during recovery");
+            return false;
+        }
+
+        recoveryState = BridgeRecoveryState::Healthy;
+        adbReadyOnce = true;
+        connectFailCount = 0;
+        quickDisconnectCount = 0;
+        adbLostDelayMs = ADB_LOST_RETRY_MIN_MS;
+        nextIdleHealthTick = GetTickCount64() + IDLE_HEALTH_CHECK_MS;
+        printf("[Bridge] ADB recovered and forward verified\n");
+        fflush(stdout);
+        return true;
+    };
+
+    auto pollAdbLost = [&]() {
+        uint64_t now = GetTickCount64();
+        if (now < nextAdbCheckTick) return;
+
+        if (adb.isDeviceOnline(serial)) {
+            adbLostDelayMs = ADB_LOST_RETRY_MIN_MS;
+            recoverAdb("device online");
+            return;
+        }
+
+        if (now - lastAdbLostLogTick >= ADB_LOST_LOG_MS) {
+            printf("[Bridge] waiting for ADB device...\n");
+            fflush(stdout);
+            lastAdbLostLogTick = now;
+        }
+        nextAdbCheckTick = now + adbLostDelayMs;
+        if (adbLostDelayMs < ADB_LOST_RETRY_MAX_MS) {
+            adbLostDelayMs += 1000;
+            if (adbLostDelayMs > ADB_LOST_RETRY_MAX_MS) {
+                adbLostDelayMs = ADB_LOST_RETRY_MAX_MS;
+            }
+        }
+    };
 
     while (g_running.load()) {
+        if (recoveryState == BridgeRecoveryState::AdbLost) {
+            pollAdbLost();
+            Sleep(200);
+            continue;
+        }
+
         if (!g_alwaysHot.load(std::memory_order_relaxed) &&
             g_demandMode.load(std::memory_order_relaxed) &&
             !g_micRequested.load(std::memory_order_relaxed)) {
+            g_bridgeStatus.store(BRIDGE_IDLE_SLEEP, std::memory_order_relaxed);
+            uint64_t now = GetTickCount64();
+            if (adbReadyOnce && now >= nextIdleHealthTick) {
+                nextIdleHealthTick = now + IDLE_HEALTH_CHECK_MS;
+                if (!adb.isDeviceOnline(serial)) {
+                    enterAdbLost("idle health check found device offline");
+                } else if (!adb.verifyForward(port, remoteSocket)) {
+                    printf("[Bridge] idle health check found missing forward\n");
+                    fflush(stdout);
+                    recoverAdb("idle forward missing");
+                }
+            }
             Sleep(200);
             continue;
         }
@@ -170,16 +302,22 @@ void audioBridgeThread() {
                 connectFailCount++;
                 printf("[Bridge] connect fail #%d\n", connectFailCount);
                 fflush(stdout);
-                if (connectFailCount == 1 && wasPreviouslyConnected) {
+                if (!adb.isDeviceOnline(serial)) {
+                    enterAdbLost("connect failed and ADB device is offline");
+                    Sleep(200);
+                    continue;
+                }
+                if (connectFailCount == 1 && adbReadyOnce) {
                     printf("[Bridge] first fail after connection, refreshing ADB forward\n");
                     fflush(stdout);
-                    std::string remoteSocket = "localabstract:" + androidSocket;
-                    adb.refreshForward(port, remoteSocket);
+                    if (!adb.refreshForward(port, remoteSocket)) {
+                        recoverAdb("forward refresh failed");
+                    }
                 }
                 if (connectFailCount >= 3) {
                     printf("[Bridge] 3 consecutive connect fails, full reset\n");
                     fflush(stdout);
-                    adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc);
+                    recoverAdb("3 consecutive connect fails");
                     connectFailCount = 0;
                 }
                 Sleep(200);
@@ -187,6 +325,9 @@ void audioBridgeThread() {
             }
             connectFailCount = 0;
             wasPreviouslyConnected = true;
+            recoveryState = BridgeRecoveryState::Healthy;
+            nextIdleHealthTick = GetTickCount64() + IDLE_HEALTH_CHECK_MS;
+            g_bridgeStatus.store(BRIDGE_STREAMING, std::memory_order_relaxed);
             QueryPerformanceCounter(&t1);
             double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)qpcFreq.QuadPart;
             printf("Socket connected (%.2fms)\n", ms);
@@ -241,6 +382,7 @@ void audioBridgeThread() {
 
             if (!effectiveActive) {
                 g_micStreaming.store(false);
+                g_bridgeStatus.store(BRIDGE_IDLE_HOT, std::memory_order_relaxed);
                 if (g_trayIcon && !wasIdle) g_trayIcon->updateIcon(false, true);
                 idleCount++;
                 wasIdle = true;
@@ -261,6 +403,7 @@ void audioBridgeThread() {
 
             idleCount = 0;
             g_micStreaming.store(true);
+            g_bridgeStatus.store(BRIDGE_STREAMING, std::memory_order_relaxed);
             if (g_trayIcon && wasIdle) g_trayIcon->updateIcon(true, true);
 
             if (wasIdle) {
@@ -313,13 +456,17 @@ void audioBridgeThread() {
         if (quickDisconnectCount >= 3) {
             printf("3 consecutive quick disconnects, restarting Android app\n");
             fflush(stdout);
-            adb.setupAudioSource(androidComponent, androidSocket, ns, aec, agc);
+            if (!adb.isDeviceOnline(serial)) {
+                enterAdbLost("quick disconnects and ADB device is offline");
+            } else {
+                recoverAdb("3 consecutive quick disconnects");
+            }
             quickDisconnectCount = 0;
         }
     }
 
     socketClient.disconnect();
-    adb.cleanup();
+    adb.cleanup(port);
 }
 
 int main(int argc, char* argv[]) {
