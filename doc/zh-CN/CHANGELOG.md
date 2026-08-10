@@ -2,6 +2,60 @@
 
 **简体中文** | [English](../../CHANGELOG.md)
 
+## v0.6.4 (2026-08-09)
+
+### DPDFNet 重试与状态修正
+
+| 修复 | 说明 |
+|------|------|
+| **显式重试** | DPDFNet 处于“资源可用但 worker 卡住”的 degraded 状态时点击 OK 会发送 reset 请求，无需重启即可重试；普通后端/NR 变更仍由 render 的单次变更检测处理，不会重复 reset。 |
+| **硬失败状态** | worker/session 真正失败时显示为 unavailable，而不是可重试的 stall degraded；音频保持 RNNoise，直到重新 prepare DPDFNet。 |
+| **发布身份** | 由于 0.6.3 之后又修正了上述状态/重试逻辑，最终桌面/Android 版本升级为 `0.6.4` / Android `versionCode=10`。 |
+
+---
+
+## v0.6.3 (2026-08-09)
+
+### DPDFNet 流式稳定性
+
+| 修复 | 说明 |
+|------|------|
+| **Epoch 交接** | worker reset 不再清空输入队列，因此 render 已提交的新 epoch 首块会保留；推理期间变旧的结果也会在进入输出 FIFO 前丢弃。 |
+| **静音有上限** | reset 后模型预热最多允许 4 个 10ms 无输出 block；稳态连续 3 个 block 无输出即降级到 RNNoise，不再无限静音。 |
+| **运行状态** | 新增 `g_dpdfnetDegraded`、设置页状态和周期诊断，显示实际后端、可用性、underflow、FIFO drop 与 worker 耗时；下一次流 reset 会重试可用的 DPDFNet。 |
+| **ABI 维护** | 编译时使用固定版本的 sherpa-onnx C API 头文件，同时保留 DLL 动态加载，不增加 sherpa-onnx import library 硬依赖。 |
+| **回归测试** | 新增 RNNoise ↔ DPDFNet 切换、重复 epoch reset、worker 卡住降级的 pipeline smoke，并强化 processor reset 覆盖。 |
+
+---
+
+## v0.6.2 (2026-08-09)
+
+### 后端状态文字绘制
+
+| 修复 | 说明 |
+|------|------|
+| **状态文字重叠** | 动态降噪后端状态改为不透明绘制，重绘前明确擦除旧文字；同时为 runtime 不可用提示预留两行高度。 |
+
+---
+
+## v0.6.1 (2026-08-09)
+
+### RNNoise / DPDFNet 降噪后端可切换
+
+| 改动 | 说明 |
+|------|------|
+| **后端选择** | 新增持久化配置 `DenoiseBackend=rnnoise|dpdfnet` 与 DSP 设置下拉框，默认仍为 RNNoise。 |
+| **流式 DPDFNet** | 新增动态加载 sherpa-onnx C API 的适配器，包含独立 worker、epoch reset 和固定 480-sample FIFO 输出。 |
+| **安全回退** | runtime DLL、模型、API 符号、采样契约或 worker 失败时自动回退 RNNoise。 |
+| **构建模式** | 新增 `build.bat --dpdfnet`；RNNoise-only 仍为单 exe，DPDFNet 构建额外包含经过校验的 runtime/model/notices。 |
+| **可复现依赖** | 将固定版本的 DPDFNet 模型、sherpa-onnx runtime DLL 和 C API 头文件放入 `third_party/dpdfnet`，大文件使用 Git LFS；清空 `build/` 后仍可离线重新生成。 |
+| **清理安全性** | `build.bat --clean` 遇到被占用的生成文件时会明确失败，不再误报清理成功。 |
+| **验证** | 新增 DPDFNet streaming/fallback smoke test、runtime manifest 文件校验和固定 SHA-256 依赖准备脚本。 |
+
+DPDFNet 只是可选后端。其主观音质和端到端延迟仍需在目标 Android 设备及实际噪声环境中做 A/B 测试；本版本不会将其设为默认后端。
+
+---
+
 ## v0.5.3 (2026-05-03)
 
 ### scrcpy 开关后 ADB forward 丢失自动恢复

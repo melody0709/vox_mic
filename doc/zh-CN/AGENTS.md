@@ -18,16 +18,28 @@
 |---|------|---------|------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | 同步 `APP_VERSION` 字符串 |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=3) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=10) |
 
 `src/tray_icon.cpp` 已通过 `#include "version.h"` 自动同步，无需手动修改。
 
 ## 构建 & 运行
 
 ```cmd
-build.bat                        # 需 VS2022 C++
-build\voxmic.exe                 # 启动 (托盘后台)
-build\voxmic.exe --list-devices  # 列出设备
+build.bat                        # RNNoise-only 构建 + 安装
+build.bat --dpdfnet              # 准备校验依赖并启用 DPDFNet
+build.bat --dpdfnet --package    # 构建并打包可选 DPDFNet 载荷
+build.bat --dpdfnet --test-dpdfnet # 构建并运行 DPDFNet smoke
+build\run\x64-release\voxmic.exe                 # 启动 (托盘后台)
+build\run\x64-release\voxmic.exe --list-devices  # 列出设备
+```
+
+可选 DPDFNet 依赖位于 `third_party/dpdfnet/`，模型和 DLL 使用 Git LFS 管理。clone 后先执行 `git lfs pull`，再运行 `build.bat --dpdfnet`；脚本会校验仓库内文件并将其暂存到 `build/cmake/x64-release/_deps/dpdfnet`。`build/` 是可清理的生成目录，清空后不会丢失依赖来源；只有仓库依赖目录缺失时才使用固定 SHA-256 的下载/缓存回退。
+
+DPDFNet 验证目标（执行 DPDFNet 构建后）：
+```cmd
+build\cmake\x64-release\dpdfnet_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
+build\cmake\x64-release\dpdfnet_fallback_smoke.exe build\run\x64-release build\run\x64-release\models\missing-for-test.onnx
+build\cmake\x64-release\dpdfnet_pipeline_switch_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
 ```
 
 Android App (SDK `D:\@APP\android-platform-sdk\android-sdk`, Gradle 8.7, JDK 17):
@@ -74,14 +86,17 @@ src/
 ├── socket_client.h/cpp          # TCP socket 客户端
 ├── adb_control.h/cpp            # ADB (CreateProcess + CREATE_NO_WINDOW)
 ├── tray_icon.h/cpp              # 系统托盘 + 右键菜单
-├── config.h/cpp                 # config.ini 持久化 (21 字段)
+├── config.h/cpp                 # config.ini 持久化 (20 字段)
 ├── settings_dialog.h/cpp        # 非模态设置窗口
 ├── mic_usage_monitor.h/cpp      # 事件驱动 COM + IAudioMeterInformation 静音兜底
 └── dsp/
-    ├── pipeline.h               # DSP 链 (RNNoise→HPF→EQ→Comp→Limiter)
+    ├── pipeline.h               # DSP 链 (RNNoise/DPDFNet→HPF→EQ→Comp→Limiter)
+    ├── dpdfnet_processor.h/cpp  # 可选 DPDFNet worker/FIFO 适配器
     ├── biquad.h                 # BiQuad IIR
     └── rnnoise/ (27 files)      # 官方 RNNoise v0.2 (C 编译, 无外部依赖)
 ```
+
+`third_party/dpdfnet/` 保存可选 DPDFNet 的固定依赖来源：模型和 Windows x64 runtime DLL 使用 Git LFS，C API 头文件、`metadata.json` 与许可证说明使用普通文本文件管理。`build/` 中的 `_deps`、运行载荷和测试产物均可删除后重新生成。
 
 ## 线程模型
 
@@ -122,13 +137,18 @@ render:    ring buffer pop → int16→float → DspPipeline → WASAPI write
 
 ### DSP 管线 & 配置
 
-DSP: RNNoise(22-Bark GRU) → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass -6-0dB) → Comp(-18dBFS, 3:1) → Limiter(-1dBFS)
+DSP: 可选 RNNoise/DPDFNet 降噪 → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass -6-0dB) → Comp(-18dBFS, 3:1) → Limiter(-1dBFS)
 
 | 原子变量 | 用途 | 线程 |
 |------|------|------|
 | `g_gain` | 增益倍率 | bridge → render |
 | `g_nrEnabled` / `g_eqEnabled` / `g_compressorEnabled` | DSP 开关 | bridge → render |
 | `g_nrStrength` | NR 降噪强度 (0.3-0.95) | bridge → render |
+| `g_denoiseBackend` | 请求后端 (`rnnoise`/`dpdfnet`) | settings → render |
+| `g_denoiseEffectiveBackend` | 回退后的实际后端 | render → settings |
+| `g_dpdfnetAvailable` | DPDFNet runtime/model/session 可用性 | render → settings |
+| `g_dpdfnetDegraded` | DPDFNet worker 卡住并暂时降级到 RNNoise | render → settings |
+| `g_denoiseResetEpoch` | 流/后端 reset 通知 | bridge/settings → render |
 | `g_eqPresence` / `g_eqBassCut` | EQ 参数 | bridge → render |
 | `g_micRequested` | 应用是否在捕获 | monitor → bridge |
 | `g_micStreaming` | 是否在推流 | bridge → tray |
@@ -136,7 +156,7 @@ DSP: RNNoise(22-Bark GRU) → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass -6-0dB) 
 | `g_demandMode` | Demand Mode 开关 | tray → monitor/bridge |
 | `g_alwaysHot` | Always Hot 开关 | tray → bridge |
 
-配置 21 字段，config.ini 持久化。`syncDspAtomsFromConfig()` 在 `main.cpp`，启动和重连时调用。
+配置 20 字段，config.ini 持久化。`syncDspAtomsFromConfig()` 在 `main.cpp`，启动和重连时调用。
 
 ### Monitor 三层检测
 

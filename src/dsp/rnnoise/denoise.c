@@ -326,6 +326,13 @@ void rnnoise_destroy(DenoiseState *st) {
   free(st);
 }
 
+void rnnoise_reset(DenoiseState *st) {
+  if (st == NULL) return;
+  float strength = st->strength;
+  rnnoise_init(st, NULL);
+  st->strength = strength;
+}
+
 void rnnoise_set_strength(DenoiseState *st, float strength) {
   if (strength < 0.3f) strength = 0.3f;
   if (strength > 0.95f) strength = 0.95f;

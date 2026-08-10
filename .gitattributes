@@ -1,0 +1,2 @@
+/third_party/dpdfnet/model/*.onnx filter=lfs diff=lfs merge=lfs -text
+/third_party/dpdfnet/runtime/*.dll filter=lfs diff=lfs merge=lfs -text

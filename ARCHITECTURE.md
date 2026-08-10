@@ -23,7 +23,7 @@ voxmic.exe
     |           |
     |   +---------------------------------------------+
     |   |  DSP Pipeline (src/dsp/)                    |
-    |   |  1. RNNoise 22-Bark GRU denoise + comb      |
+    |   |  1. Selected denoiser: RNNoise or DPDFNet   |
     |   |  2. HPF 80Hz BiQuad IIR                     |
     |   |  3. EQ 6-band (Presence/Bass Cut adj.)      |
     |   |  4. RMS Compressor (3:1, 5ms/50ms)          |
@@ -50,11 +50,12 @@ voxmic.exe
 | `socket_client.h/cpp` | Winsock2 TCP client (includes waitForData) |
 | `adb_control.h/cpp` | ADB commands, device detection, App launch, port forwarding, **forward quick refresh** (**CreateProcess + CREATE_NO_WINDOW**, no flicker) |
 | `tray_icon.h/cpp` | System tray + context menu (includes gray version number) |
-| `config.h/cpp` | config.ini persistence (**21 fields**) |
+| `config.h/cpp` | config.ini persistence (**20 fields**) |
 | `settings_dialog.h/cpp` | **Main window** GUI (device/network/app/audio/DSP/Debug, modeless persistent window) |
 | **`mic_usage_monitor.h/cpp`** | Phase 3+8: Event-driven (IAudioSessionNotification + IAudioSessionEvents) |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
-| **`dsp/pipeline.h`** | DSP chain scheduling (RNNoise->HPF->EQ->Comp->Limiter) |
+| **`dsp/pipeline.h`** | DSP chain scheduling (RNNoise/DPDFNet->HPF->EQ->Comp->Limiter) |
+| **`dsp/dpdfnet_processor.h/cpp`** | Optional pinned-header sherpa-onnx C ABI loader, worker thread, epoch reset/watchdog, and 480-sample FIFO adapter |
 | **`dsp/rnnoise/` (27 files)** | Official RNNoise v0.2 source + pre-generated model (from werman fork) |
 
 ## DSP Pipeline Details
@@ -62,7 +63,12 @@ voxmic.exe
 ```
 480 frames float32[] input
     |
-[1] RNNoise: rnnoise_process_frame(st, out, in)  <- g_nrEnabled control
+[1] Selected denoiser <- g_nrEnabled + DenoiseBackend control
+    - RNNoise: rnnoise_process_frame(st, out, in), adjustable `NR Strength`
+    - DPDFNet: 48 kHz online ONNX model on a dedicated worker; variable API output is buffered into fixed 480-sample blocks
+    - New-epoch input is retained across a worker reset; old-tagged input/result blocks are discarded without calling the model
+    - DPDFNet DLL/model/ABI failure or worker stall falls back to RNNoise without stopping the audio path
+    - At reset, up to four empty 10ms blocks are allowed for model context; three consecutive steady-state empty blocks mark the worker degraded and use RNNoise
     - 3-layer GRU (96+96+96), 22 Bark bands, 85KB quantized weights
     - Per-band independent gain + comb filtering + VAD probability
     - Latency: 10ms (one frame)
@@ -90,10 +96,13 @@ voxmic.exe
 | Parameter | Default | Atomic Variable | Settings |
 |-----------|---------|-----------------|----------|
 | NR Enable | true | `g_nrEnabled` | checkbox |
+| Denoise Backend | `rnnoise` | `g_denoiseBackend` / `DenoiseBackend` | RNNoise or DPDFNet combo |
 | EQ Enable | true | `g_eqEnabled` | checkbox |
 | Presence | +3.0 dB | `g_eqPresence` | slider 0-6dB |
 | Bass Cut | -3.0 dB | `g_eqBassCut` | slider -6-0dB |
 | Comp Enable | true | `g_compressorEnabled` | checkbox |
+
+`NR Strength` is preserved in `config.ini` for RNNoise compatibility and is disabled in the UI when DPDFNet is selected. The requested backend remains persisted even when DPDFNet resources are unavailable; the effective backend is reported separately and remains RNNoise until the resources are restored. `g_dpdfnetDegraded` distinguishes a ready-but-stalled worker from a missing runtime and is cleared for a retry at the next stream reset. DPDFNet's online API does not expose a model-strength slider; VoxMic pins the 48 kHz `dpdfnet2_48khz_hr` model, CPU provider, one inference thread, and debug off. Those are packaging/developer choices, not Settings controls.
 
 ## Phase 3+8: On-demand Activation + Event-driven
 
@@ -113,7 +122,8 @@ voxmic.exe
 main thread:         Message pump + SetTimer(stats, 5s)
 monitor thread:      Sleep(1000) only keeps COM apartment alive (Phase 8 event-driven)
 bridge thread:       ADB one-time init (CreateProcess NO_WINDOW) + Socket on-demand connection (idle 5s disconnect, connect ~0.4ms) -> g_micRequested gate -> ring buffer push/discard
-render thread:       Event-driven ring buffer pop -> int16->float -> DspPipeline (47us/block) -> WASAPI write
+render thread:       Event-driven ring buffer pop -> int16->float -> DspPipeline -> WASAPI write
+DPDFNet worker:      tagged SPSC input queue -> sherpa-onnx Run() -> tagged output FIFO -> fixed 480-sample blocks; reset preserves new-epoch input, watchdog protects render; no DLL/model I/O on render
 ```
 
 ## Latency Budget
@@ -125,6 +135,7 @@ render thread:       Event-driven ring buffer pop -> int16->float -> DspPipeline
 | ADB + Socket | ~2ms |
 | Ring Buffer | ~10ms (1-2 blocks) |
 | RNNoise + EQ + Comp + Limiter | ~50us (measured) |
+| DPDFNet worker inference | ~1.7ms EMA in the reference smoke test; reset warm-up is bounded and stalled output downgrades to RNNoise |
 | WASAPI Buffer | ~11ms (VB-CABLE 22ms half-buffer) |
 | VB-CABLE | ~3ms |
 | **Total** | **~40ms** (measured) |
@@ -146,3 +157,19 @@ Stop
 DSP parameters (NR/EQ/Presence/BassCut/Comp) are processed on the Windows side only, no communication with Android.
 
 Android side only passes audio effect flags (NS/AEC/AGC) to `RecordService`.
+
+## Optional DPDFNet Runtime
+
+The default build (`build.bat`) embeds RNNoise only. The source-controlled DPDFNet payload is kept under `third_party/dpdfnet/` (large model/DLL files use Git LFS):
+
+```
+third_party/dpdfnet/
+├─ include/sherpa-onnx/c-api/c-api.h
+├─ model/dpdfnet2_48khz_hr.onnx
+├─ runtime/sherpa-onnx-c-api.dll
+├─ runtime/onnxruntime.dll
+├─ runtime/onnxruntime_providers_shared.dll
+└─ metadata.json
+```
+
+After cloning, run `git lfs pull`. `build.bat --dpdfnet` verifies the vendored files, stages them under `build/cmake/x64-release/_deps/dpdfnet`, and installs the DLLs under the executable directory plus the model under `models/`. CMake compiles the adapter against that pinned C API header, but the executable still resolves every DLL symbol dynamically and has no sherpa-onnx import-library dependency. The runtime manifest includes every installed file, so deleting `build/` only removes generated output. If any optional file or required C API symbol is missing at runtime, the process still starts with RNNoise.

@@ -2,6 +2,60 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
+## v0.6.4 (2026-08-09)
+
+### DPDFNet retry/status correctness
+
+| Fix | Description |
+|-----|-------------|
+| **Explicit retry** | Clicking OK while DPDFNet is in the ready-but-stalled degraded state now sends a reset request, so the worker can be retried without restarting the application. Ordinary backend/NR changes still rely on the single render-thread change detection and do not cause a duplicate reset. |
+| **Hard failure status** | A worker/session failure is reported as unavailable rather than as a retryable degraded stall; the render path remains on RNNoise until a fresh DPDFNet prepare. |
+| **Release identity** | Bumped the final desktop/Android release to `0.6.4` / Android `versionCode=10` after the post-0.6.3 correctness fixes. |
+
+---
+
+## v0.6.3 (2026-08-09)
+
+### DPDFNet stream resilience
+
+| Fix | Description |
+|-----|-------------|
+| **Epoch hand-off** | The worker no longer clears its input queue during a reset, so a render-thread block already tagged with the new epoch is retained. Results that become stale while inference is running are discarded before they can occupy the output FIFO. |
+| **Bounded silence** | DPDFNet warm-up permits at most four 10 ms empty-output blocks after a reset. A steady worker with three consecutive empty blocks is downgraded to RNNoise for the current stream instead of producing unlimited silence. |
+| **Runtime status** | Added `g_dpdfnetDegraded`, a Settings status message, and periodic diagnostics for effective backend, availability, underflows, FIFO drops, and worker timing. A stream reset retries a ready DPDFNet worker. |
+| **ABI maintenance** | The adapter now compiles against the pinned sherpa-onnx C API header while retaining dynamic DLL loading; no sherpa-onnx import-library dependency is added. |
+| **Regression coverage** | Added a pipeline switch smoke test for RNNoise ↔ DPDFNet, repeated epoch resets, and a deliberately stalled worker; strengthened the processor smoke reset coverage. |
+
+---
+
+## v0.6.2 (2026-08-09)
+
+### Backend status rendering
+
+| Fix | Description |
+|-----|-------------|
+| **Overlapping status text** | The dynamic Denoise Backend status is now painted opaquely and explicitly erased before redraw. It also reserves two lines for the unavailable-runtime message. |
+
+---
+
+## v0.6.1 (2026-08-09)
+
+### Selectable RNNoise / DPDFNet noise-reduction backend
+
+| Change | Description |
+|--------|-------------|
+| **Backend selection** | Added persistent `DenoiseBackend=rnnoise|dpdfnet` configuration and a DSP settings selector. RNNoise remains the default. |
+| **Streaming DPDFNet** | Added a dynamically loaded sherpa-onnx C API adapter with a dedicated worker, epoch reset, and fixed 480-sample FIFO output. |
+| **Fallback** | Missing runtime DLLs, model files, API symbols, contract mismatches, and worker failures fall back to RNNoise. |
+| **Build modes** | Added `build.bat --dpdfnet`; RNNoise-only installs stay single-executable, while DPDFNet installs include the verified runtime/model payload and notices. |
+| **Reproducible dependencies** | Vendored the pinned DPDFNet model, sherpa-onnx runtime DLLs, and C API header under `third_party/dpdfnet` with Git LFS; a clean `build/` can be regenerated without network access. |
+| **Clean safety** | `build.bat --clean` now fails clearly when a generated runtime file is locked instead of reporting a false successful cleanup. |
+| **Validation** | Added DPDFNet streaming and fallback smoke tests, runtime manifest coverage, and pinned SHA-256 dependency preparation. |
+
+The DPDFNet backend is an optional alternative. Its subjective quality and end-to-end latency still require A/B testing on the target Android devices and noise environments; this change does not make DPDFNet the default.
+
+---
+
 ## v0.5.3 (2026-05-03)
 
 ### Auto-recovery from ADB forward loss after scrcpy toggle

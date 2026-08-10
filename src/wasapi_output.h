@@ -6,8 +6,10 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <atomic>
+#include <cstdint>
 #include <thread>
 #include "ring_buffer.h"
+#include "dsp/pipeline.h"
 
 #define SAMPLE_RATE 48000
 #define INPUT_CHANNELS 1
@@ -35,6 +37,11 @@ public:
     std::atomic<double> estLatencyMs{0};
     std::atomic<int> renderStallScore{0};
 
+    double dpdfnetWorkerProcUsEma() const { return m_pipeline.dpdfnetWorkerProcUsEma(); }
+    uint64_t dpdfnetUnderflows() const { return m_pipeline.dpdfnetUnderflows(); }
+    uint64_t dpdfnetInputDrops() const { return m_pipeline.dpdfnetInputDrops(); }
+    uint64_t dpdfnetOutputDrops() const { return m_pipeline.dpdfnetOutputDrops(); }
+
 private:
     bool initCOM();
     bool initDeviceEnumerator();
@@ -54,8 +61,10 @@ private:
     UINT32 m_deviceChannels{2};
     UINT32 m_deviceBits{32};
     double m_resampleRatio{1.0};
+    bool m_pipelineReady{false};
 
     SPSCRingBuffer m_ringBuffer{BLOCK_SIZE * RING_BUFFER_BLOCKS};
+    DspPipeline m_pipeline;
     std::thread m_renderThread;
     std::atomic<bool> m_running{false};
     HANDLE m_hEvent{nullptr};

@@ -20,6 +20,7 @@ public:
     bool compressorEnabled = true;
     bool nrEnabled = true;
     float nrStrength = 0.6f;
+    std::string denoiseBackend = "rnnoise";
     bool debugConsole = true;
     bool demandMode = true;
     bool alwaysHot = false;

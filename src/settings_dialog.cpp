@@ -14,8 +14,13 @@ extern Config g_config;
 extern std::atomic<bool> g_running;
 extern std::atomic<bool> g_demandMode;
 extern std::atomic<bool> g_alwaysHot;
+extern std::atomic<bool> g_dpdfnetAvailable;
+extern std::atomic<bool> g_dpdfnetDegraded;
+extern std::atomic<int> g_denoiseBackend;
+extern std::atomic<int> g_denoiseEffectiveBackend;
 extern TrayIcon* g_trayIcon;
 extern void syncDspAtomsFromConfig();
+extern void requestDenoiseReset();
 
 #define SETTINGS_CLASS "VoxMicSettingsClass"
 #define IDC_COMBO_DEVICE      2001
@@ -44,6 +49,9 @@ extern void syncDspAtomsFromConfig();
 #define IDC_LABEL_NRSTR       2024
 #define IDC_CHECK_STARTUP     2025
 #define IDC_LABEL_STARTUP_HINT 2026
+#define IDC_COMBO_NR_BACKEND  2027
+#define IDC_LABEL_NR_BACKEND_STATUS 2028
+#define ID_TIMER_BACKEND_STATUS 2
 
 struct SettingsDialogData {
     Config* pConfig;
@@ -115,6 +123,58 @@ static void updateNrStrLabel(HWND hWnd) {
     SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_NRSTR), buf);
 }
 
+static void updateDenoiseBackendUi(HWND hWnd) {
+    HWND combo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
+    HWND strength = GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR);
+    HWND strengthLabel = GetDlgItem(hWnd, IDC_LABEL_NRSTR);
+    HWND status = GetDlgItem(hWnd, IDC_LABEL_NR_BACKEND_STATUS);
+    if (!combo || !strength || !strengthLabel || !status) return;
+
+    const int selection = (int)SendMessageA(combo, CB_GETCURSEL, 0, 0);
+    const bool dpdfnetRequested = selection == 1;
+    EnableWindow(strength, dpdfnetRequested ? FALSE : TRUE);
+    EnableWindow(strengthLabel, dpdfnetRequested ? FALSE : TRUE);
+
+    const int activeRequestedBackend = g_denoiseBackend.load(
+        std::memory_order_acquire);
+    const bool selectionIsApplied = activeRequestedBackend ==
+        (dpdfnetRequested ? 1 : 0);
+    const char* statusText = nullptr;
+    if (!dpdfnetRequested) {
+        statusText = selectionIsApplied
+            ? "RNNoise is the active built-in backend."
+            : "RNNoise is selected; click OK to apply it.";
+    } else if (!selectionIsApplied) {
+        statusText = g_dpdfnetAvailable.load(std::memory_order_acquire)
+            ? "DPDFNet is ready; click OK to apply it."
+            : "DPDFNet is unavailable; click OK to keep the request and use RNNoise.";
+    } else if (g_dpdfnetDegraded.load(std::memory_order_acquire)) {
+        statusText =
+            "DPDFNet was degraded to RNNoise after a worker stall; it will retry after the next stream reset.";
+    } else if (!g_dpdfnetAvailable.load(std::memory_order_acquire)) {
+        statusText =
+            "DPDFNet is unavailable; audio will use RNNoise until the runtime/model/session is available.";
+    } else if (g_denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
+        statusText = "DPDFNet is ready and selected.";
+    } else {
+        statusText = "DPDFNet is ready; it will take effect at the next audio block.";
+    }
+
+    char previousText[512] = {};
+    GetWindowTextA(status, previousText, static_cast<int>(sizeof(previousText)));
+    if (std::strcmp(previousText, statusText) == 0) return;
+
+    // The status text changes while the window remains open. Clear first and
+    // force an immediate repaint so a shorter replacement cannot leave glyphs
+    // from the previous message behind.
+    SetWindowTextA(status, "");
+    RedrawWindow(status, nullptr, nullptr,
+        RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
+    SetWindowTextA(status, statusText);
+    RedrawWindow(status, nullptr, nullptr,
+        RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
+}
+
 static void showTabControls(const SettingsDialogData* pData, int tabIndex) {
     int swGen = (tabIndex == 0) ? SW_SHOW : SW_HIDE;
     int swDsp = (tabIndex == 1) ? SW_SHOW : SW_HIDE;
@@ -168,6 +228,13 @@ static void loadUiFromConfig(HWND hWnd, const Config* cfg) {
     if (nrPos > 95) nrPos = 95;
     SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_SETPOS, TRUE, nrPos);
     updateNrStrLabel(hWnd);
+
+    HWND backendCombo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
+    if (backendCombo) {
+        const int backend = (_stricmp(cfg->denoiseBackend.c_str(), "dpdfnet") == 0) ? 1 : 0;
+        SendMessageA(backendCombo, CB_SETCURSEL, (WPARAM)backend, 0);
+        updateDenoiseBackendUi(hWnd);
+    }
 
     SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_SETCHECK,
         cfg->debugConsole ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -230,6 +297,12 @@ static void saveUiToConfig(HWND hWnd, Config* cfg) {
     cfg->nrStrength = (float)nrPos / 100.0f;
     if (cfg->nrStrength < 0.3f) cfg->nrStrength = 0.3f;
     if (cfg->nrStrength > 0.95f) cfg->nrStrength = 0.95f;
+
+    HWND backendCombo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
+    const int backend = backendCombo
+        ? (int)SendMessageA(backendCombo, CB_GETCURSEL, 0, 0)
+        : 0;
+    cfg->denoiseBackend = (backend == 1) ? "dpdfnet" : "rnnoise";
 
     cfg->debugConsole =
         (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -486,7 +559,26 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             WS_CHILD | BS_AUTOCHECKBOX,
             xMargin, yBase, 150, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL));
 
-        yBase += 35;
+        yBase += 30;
+
+        addDsp(CreateWindowExA(0, "STATIC", "Backend:",
+            WS_CHILD,
+            xMargin + 10, yBase, lblW - 10, 22, hWnd, NULL, hInst, NULL));
+
+        HWND hBackendCombo = addDsp(CreateWindowExA(0, "COMBOBOX", "",
+            WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
+            ctrlX, yBase, 190, 100, hWnd, (HMENU)IDC_COMBO_NR_BACKEND, hInst, NULL));
+        SendMessageA(hBackendCombo, CB_ADDSTRING, 0, (LPARAM)"RNNoise (built-in)");
+        SendMessageA(hBackendCombo, CB_ADDSTRING, 0, (LPARAM)"DPDFNet (48 kHz model)");
+
+        yBase += 28;
+        HWND hBackendStatus = addDsp(CreateWindowExA(0, "STATIC", "",
+            WS_CHILD | SS_OWNERDRAW,
+            xMargin + 20, yBase, 420, 40, hWnd,
+            (HMENU)IDC_LABEL_NR_BACKEND_STATUS, hInst, NULL));
+        SendMessageA(hBackendStatus, WM_SETFONT, (WPARAM)pData->hHintFont, TRUE);
+
+        yBase += 42;
 
         addDsp(CreateWindowExA(0, "STATIC", "NR Strength:",
             WS_CHILD,
@@ -533,13 +625,23 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         refreshDeviceList(hCombo, cfg->serial);
 
         refreshStartupRegistrationControl(hWnd);
+        SetTimer(hWnd, ID_TIMER_BACKEND_STATUS, 500, nullptr);
 
         return 0;
     }
 
     case WM_SHOWWINDOW:
         // 每次显示都重新查注册表（Portable 移动后旧值失效会被识别）。
-        if (wParam) refreshStartupRegistrationControl(hWnd);
+        if (wParam) {
+            refreshStartupRegistrationControl(hWnd);
+            updateDenoiseBackendUi(hWnd);
+        }
+        return 0;
+
+    case WM_TIMER:
+        if (wParam == ID_TIMER_BACKEND_STATUS && IsWindowVisible(hWnd)) {
+            updateDenoiseBackendUi(hWnd);
+        }
         return 0;
 
     case WM_TRAYICON:
@@ -550,6 +652,31 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             if (g_trayIcon) g_trayIcon->showMenu(hWnd);
         }
         return 0;
+
+    case WM_DRAWITEM: {
+        const DRAWITEMSTRUCT* draw = (const DRAWITEMSTRUCT*)lParam;
+        if (draw && draw->CtlID == IDC_LABEL_NR_BACKEND_STATUS) {
+            FillRect(draw->hDC, &draw->rcItem,
+                GetSysColorBrush(COLOR_BTNFACE));
+
+            HFONT oldFont = nullptr;
+            if (pData && pData->hHintFont) {
+                oldFont = (HFONT)SelectObject(draw->hDC, pData->hHintFont);
+            }
+            SetBkMode(draw->hDC, TRANSPARENT);
+            SetTextColor(draw->hDC, RGB(128, 128, 128));
+
+            char text[512] = {};
+            GetWindowTextA(draw->hwndItem, text, (int)sizeof(text));
+            RECT textRect = draw->rcItem;
+            DrawTextA(draw->hDC, text, -1, &textRect,
+                DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
+
+            if (oldFont) SelectObject(draw->hDC, oldFont);
+            return TRUE;
+        }
+        break;
+    }
 
     case WM_CTLCOLORSTATIC: {
         HWND hCtrl = (HWND)lParam;
@@ -597,19 +724,36 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         case IDC_BTN_REFRESH:
             refreshDeviceList(hCombo, pData->pConfig->serial);
             break;
+        case IDC_COMBO_NR_BACKEND:
+            if (HIWORD(wParam) == CBN_SELCHANGE) updateDenoiseBackendUi(hWnd);
+            break;
         case IDC_BTN_RESET: {
             Config defaultCfg;
             loadUiFromConfig(hWnd, &defaultCfg);
             break;
         }
-        case IDC_BTN_OK:
+        case IDC_BTN_OK: {
             // 事务性保存：开机自启注册表变更成功后才提交 config.ini 与 DSP 原子量。
             if (!saveStartupRegistrationControl(hWnd)) return 0;
+            const std::string oldBackend = pData->pConfig->denoiseBackend;
+            const bool oldNrEnabled = pData->pConfig->nrEnabled;
+            const bool wasDpdfnetDegraded =
+                g_dpdfnetDegraded.load(std::memory_order_acquire);
             saveUiToConfig(hWnd, pData->pConfig);
             pData->pConfig->save();
             syncDspAtomsFromConfig();
+            const bool backendChanged =
+                _stricmp(oldBackend.c_str(), pData->pConfig->denoiseBackend.c_str()) != 0;
+            const bool nrChanged = oldNrEnabled != pData->pConfig->nrEnabled;
+            if (wasDpdfnetDegraded && !backendChanged && !nrChanged) {
+                // Re-applying DPDFNet after a watchdog downgrade is an
+                // explicit retry request; the render thread performs the
+                // state reset at its next block boundary.
+                requestDenoiseReset();
+            }
             ShowWindow(hWnd, SW_HIDE);
             break;
+        }
         case IDC_BTN_CANCEL:
             loadUiFromConfig(hWnd, pData->pConfig);
             ShowWindow(hWnd, SW_HIDE);
@@ -659,6 +803,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         return 0;
 
     case WM_DESTROY:
+        KillTimer(hWnd, ID_TIMER_BACKEND_STATUS);
         if (pData && pData->hHintFont) {
             DeleteObject(pData->hHintFont);
             pData->hHintFont = NULL;

@@ -134,13 +134,33 @@ if (!(Test-Path -LiteralPath $installManifestPath -PathType Leaf)) {
     throw "CMake Runtime install manifest is missing: $installManifestPath"
 }
 
-# VoxMic is a single-EXE payload (no DLLs, no models, no helper scripts).
+# RNNoise-only remains a single-EXE payload.  The optional DPDFNet build adds
+# only the explicitly packaged runtime DLLs, model, and third-party notice.
 foreach ($required in @(
         "voxmic.exe",
         "runtime-manifest.json")) {
     $path = Join-Path $runtimeRootPath $required.Replace('/', '\')
     if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required runtime file is missing: $required"
+    }
+}
+
+$runtimeFileNames = @(
+    "sherpa-onnx-c-api.dll",
+    "onnxruntime.dll",
+    "onnxruntime_providers_shared.dll",
+    "models/dpdfnet2_48khz_hr.onnx",
+    "third-party-notices/DPDFNET_THIRD_PARTY_NOTICES.txt"
+)
+$presentOptionalFiles = @($runtimeFileNames | Where-Object {
+    Test-Path -LiteralPath (Join-Path $runtimeRootPath $_) -PathType Leaf
+})
+if ($presentOptionalFiles.Count -gt 0) {
+    foreach ($requiredOptional in $runtimeFileNames) {
+        $optionalPath = Join-Path $runtimeRootPath $requiredOptional.Replace('/', '\')
+        if (!(Test-Path -LiteralPath $optionalPath -PathType Leaf)) {
+            throw "Incomplete DPDFNet runtime payload; missing: $requiredOptional"
+        }
     }
 }
 

@@ -1,0 +1,25 @@
+VoxMic optional DPDFNet backend - third-party notices
+======================================================
+
+This runtime payload contains unmodified third-party components used only
+when the DPDFNet noise-reduction backend is selected.
+
+1. sherpa-onnx v1.13.1
+   Project: https://github.com/k2-fsa/sherpa-onnx
+   License: Apache License 2.0
+   The distributed DLL and C API are unmodified release artifacts.
+
+2. ONNX Runtime
+   Project: https://github.com/microsoft/onnxruntime
+   License: MIT License (with third-party notices in the upstream project)
+   The distributed ONNX Runtime DLLs are unmodified release dependencies
+   supplied by the sherpa-onnx Windows package.
+
+3. DPDFNet model: dpdfnet2_48khz_hr.onnx
+   Model provenance: https://github.com/ceva-ip/DPDFNet
+   Upstream model artifact: https://huggingface.co/Ceva-IP/DPDFNet
+   The model is redistributed unmodified. Users and distributors must comply
+   with the model provider's applicable terms for the selected artifact.
+
+The exact dependency archive, model URL, and SHA-256 values are recorded by
+the build preparation script and are not inferred from the files at runtime.

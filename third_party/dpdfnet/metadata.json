@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "sherpa_onnx_version": "1.13.1",
+  "sherpa_onnx_archive": "sherpa-onnx-v1.13.1-win-x64-shared-MD-Release-no-tts.tar.bz2",
+  "sherpa_onnx_archive_sha256": "6760b0e25eaad0dadffba9029b1270778e0dbfd43f314cf070b2f9c1dcb4af25",
+  "model": "dpdfnet2_48khz_hr.onnx",
+  "model_sha256": "0b399f8a58dc4d70d8cd97541f5c39869406145193b957d00a03b66070944928",
+  "files": {
+    "runtime/sherpa-onnx-c-api.dll": {
+      "sha256": "94f23cb935c57fb2581c66d65f6602ab5b509d6fc269404296af0336871daba5"
+    },
+    "runtime/onnxruntime.dll": {
+      "sha256": "8b695444d1a35ed0c8338b8c14438b3be5e0a3b222b88b1e7b4ce8753f135b50"
+    },
+    "runtime/onnxruntime_providers_shared.dll": {
+      "sha256": "ebc55b0f28e8a79cbf78e810a7f510ba70e75a2dfbcfcc6aca31ab2b8710a59a"
+    },
+    "include/sherpa-onnx/c-api/c-api.h": {
+      "sha256": "41d830b46ff80abab93b00bf728128881db2b332e0e669c3f580677d09e60ce5"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 #include "wasapi_output.h"
 #include "device_enum.h"
-#include "dsp/pipeline.h"
+#include "runtime_paths.h"
 #include <functiondiscoverykeys_devpkey.h>
 #include <comdef.h>
 #include <cstdio>
@@ -128,6 +128,15 @@ bool WASAPIOutput::init(bool listDevicesOnly) {
 
     printf("Resample: %dHz -> %uHz (ratio=%.4f)\n",
         SAMPLE_RATE, m_deviceSampleRate, m_resampleRatio);
+
+    const std::wstring executableDir = runtime_paths::ExecutableDir();
+    const std::wstring modelPath = executableDir + L"\\models\\dpdfnet2_48khz_hr.onnx";
+    m_pipelineReady = m_pipeline.init(static_cast<float>(SAMPLE_RATE),
+        executableDir, modelPath);
+    if (!m_pipelineReady) {
+        printf("ERROR: DSP pipeline initialization failed\n");
+        return false;
+    }
     printf("WASAPI ready\n");
     return true;
 }
@@ -139,9 +148,6 @@ void WASAPIOutput::renderThread() {
     UINT32 outBytesPerFrame = m_deviceChannels * (m_deviceBits / 8);
     UINT32 outBlockSize = outFrames * outBytesPerFrame;
     bool isFloat = (m_deviceBits == 32);
-
-    DspPipeline pipeline;
-    pipeline.init((float)SAMPLE_RATE);
 
     printf("Render: %d input frames -> %u output frames (event-driven)\n", FRAMES_PER_BLOCK, outFrames);
     fflush(stdout);
@@ -204,7 +210,7 @@ void WASAPIOutput::renderThread() {
                 for (int i = 0; i < FRAMES_PER_BLOCK; i++)
                     floatBuf[i] = (float)monoBuffer[i] / 32768.0f;
 
-                pipeline.process(floatBuf, FRAMES_PER_BLOCK, (float)SAMPLE_RATE);
+                m_pipeline.process(floatBuf, FRAMES_PER_BLOCK, (float)SAMPLE_RATE);
 
                 if (isFloat) {
                     float* out = (float*)pData;

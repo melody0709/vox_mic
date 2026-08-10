@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <atomic>
+#include <cstring>
 #include <thread>
 #include "wasapi_output.h"
 #include "socket_client.h"
@@ -32,6 +33,11 @@ std::atomic<float> g_eqBassCut{-3.0f};
 std::atomic<bool> g_compressorEnabled{true};
 std::atomic<bool> g_nrEnabled{true};
 std::atomic<float> g_nrStrength{0.6f};
+std::atomic<int> g_denoiseBackend{static_cast<int>(DenoiseBackendKind::Rnnoise)};
+std::atomic<uint64_t> g_denoiseResetEpoch{1};
+std::atomic<bool> g_dpdfnetAvailable{false};
+std::atomic<bool> g_dpdfnetDegraded{false};
+std::atomic<int> g_denoiseEffectiveBackend{static_cast<int>(DenoiseBackendKind::Rnnoise)};
 std::atomic<bool> g_micRequested{false};
 static std::atomic<bool> g_micStreaming{false};
 std::atomic<bool> g_demandMode{true};
@@ -81,6 +87,14 @@ void syncDspAtomsFromConfig() {
     g_compressorEnabled.store(g_config.compressorEnabled, std::memory_order_relaxed);
     g_nrEnabled.store(g_config.nrEnabled, std::memory_order_relaxed);
     g_nrStrength.store(g_config.nrStrength, std::memory_order_relaxed);
+    const int backend = (_stricmp(g_config.denoiseBackend.c_str(), "dpdfnet") == 0)
+        ? static_cast<int>(DenoiseBackendKind::Dpdfnet)
+        : static_cast<int>(DenoiseBackendKind::Rnnoise);
+    g_denoiseBackend.store(backend, std::memory_order_release);
+}
+
+void requestDenoiseReset() {
+    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
 }
 
 static void setConsoleVisible(bool visible) {
@@ -99,7 +113,11 @@ static void setConsoleVisible(bool visible) {
 
 VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
-    printf("[Stats] state=%s recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu proc=%.0fus lat=%.1fms\n",
+    const int effectiveBackend = g_denoiseEffectiveBackend.load(
+        std::memory_order_relaxed);
+    const char* denoiseName = (effectiveBackend ==
+        static_cast<int>(DenoiseBackendKind::Dpdfnet)) ? "dpdfnet" : "rnnoise";
+    printf("[Stats] state=%s recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu proc=%.0fus lat=%.1fms denoise=%s dpdf(avail=%d degraded=%d uf=%llu inDrop=%llu outDrop=%llu worker=%.0fus)\n",
         bridgeStatusName(g_bridgeStatus.load(std::memory_order_relaxed)),
         g_wasapiOutput->receivedBlocks.load(),
         g_wasapiOutput->droppedBlocks.load(),
@@ -107,7 +125,14 @@ VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
         g_wasapiOutput->idleSilenceBlocks.load(),
         g_wasapiOutput->getRingBuffer()->sizeBlocks(BLOCK_SIZE),
         g_wasapiOutput->procUsEma.load(),
-        g_wasapiOutput->estLatencyMs.load());
+        g_wasapiOutput->estLatencyMs.load(),
+        denoiseName,
+        g_dpdfnetAvailable.load(std::memory_order_relaxed) ? 1 : 0,
+        g_dpdfnetDegraded.load(std::memory_order_relaxed) ? 1 : 0,
+        static_cast<unsigned long long>(g_wasapiOutput->dpdfnetUnderflows()),
+        static_cast<unsigned long long>(g_wasapiOutput->dpdfnetInputDrops()),
+        static_cast<unsigned long long>(g_wasapiOutput->dpdfnetOutputDrops()),
+        g_wasapiOutput->dpdfnetWorkerProcUsEma());
     fflush(stdout);
 }
 
@@ -181,8 +206,9 @@ void audioBridgeThread() {
     printf("Settings:\n");
     printf("  Gain = %.2fx\n", g_config.gain);
     printf("  Android HW: NS=%d AEC=%d AGC=%d\n", ns, aec, agc);
-    printf("  DSP: NR=%d EQ=%d (Presence=+%.1fdB BassCut=%.1fdB) Compressor=%d\n",
-           g_config.nrEnabled, g_config.eqEnabled,
+    printf("  DSP: NR=%d backend=%s EQ=%d (Presence=+%.1fdB BassCut=%.1fdB) Compressor=%d\n",
+           g_config.nrEnabled, g_config.denoiseBackend.c_str(),
+           g_config.eqEnabled,
            g_config.eqPresence, g_config.eqBassCut,
            g_config.compressorEnabled);
     fflush(stdout);
@@ -210,6 +236,7 @@ void audioBridgeThread() {
         nextAdbCheckTick = now + adbLostDelayMs;
         lastAdbLostLogTick = now;
         socketClient.disconnect();
+        requestDenoiseReset();
         g_streaming.store(false);
         g_micStreaming.store(false);
         if (g_trayIcon) g_trayIcon->updateIcon(false, false);
@@ -334,6 +361,7 @@ void audioBridgeThread() {
             printf("Socket connected (%.2fms)\n", ms);
             fflush(stdout);
             connectTick = GetTickCount64();
+            requestDenoiseReset();
             g_streaming.store(true);
             g_micStreaming.store(true);
             if (g_trayIcon) {
@@ -356,6 +384,7 @@ void audioBridgeThread() {
                     printf("Socket stalled (9s), reconnecting\n");
                     fflush(stdout);
                     socketClient.disconnect();
+                    requestDenoiseReset();
                     g_streaming.store(false);
                     g_micStreaming.store(false);
                     if (g_trayIcon) g_trayIcon->updateIcon(false, false);
@@ -370,6 +399,7 @@ void audioBridgeThread() {
                 printf("Socket lost, reconnecting\n");
                 fflush(stdout);
                 socketClient.disconnect();
+                requestDenoiseReset();
                 g_streaming.store(false);
                 g_micStreaming.store(false);
                 if (g_trayIcon) g_trayIcon->updateIcon(false, false);
@@ -382,6 +412,7 @@ void audioBridgeThread() {
             bool effectiveActive = demandOff || (micRequested && !renderStalled);
 
             if (!effectiveActive) {
+                if (!wasIdle) requestDenoiseReset();
                 g_micStreaming.store(false);
                 g_bridgeStatus.store(BRIDGE_IDLE_HOT, std::memory_order_relaxed);
                 if (g_trayIcon && !wasIdle) g_trayIcon->updateIcon(false, true);
@@ -408,6 +439,7 @@ void audioBridgeThread() {
             if (g_trayIcon && wasIdle) g_trayIcon->updateIcon(true, true);
 
             if (wasIdle) {
+                requestDenoiseReset();
                 uint64_t t = g_micOnTick.load(std::memory_order_relaxed);
                 if (t) {
                     uint64_t now = GetTickCount64();
@@ -434,6 +466,7 @@ void audioBridgeThread() {
         }
 
         socketClient.disconnect();
+        requestDenoiseReset();
         g_streaming.store(false);
         g_micStreaming.store(false);
         if (g_trayIcon) {

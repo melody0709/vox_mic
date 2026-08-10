@@ -87,6 +87,12 @@ RNNOISE_EXPORT DenoiseState *rnnoise_create(RNNModel *model);
 RNNOISE_EXPORT void rnnoise_destroy(DenoiseState *st);
 
 /**
+ * Reset a denoiser state in place without allocating a new state object.
+ * The embedded default model remains available after the reset.
+ */
+RNNOISE_EXPORT void rnnoise_reset(DenoiseState *st);
+
+/**
  * Denoise a frame of samples
  *
  * in and out must be at least rnnoise_get_frame_size() large.

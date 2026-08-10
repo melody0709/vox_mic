@@ -18,7 +18,7 @@ Version is unified in `src/version.h` (`APP_VERSION` macro). On each bump, modif
 |---|------|--------------|--------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | Sync `APP_VERSION` string |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (last=3) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (last=10) |
 
 `src/tray_icon.cpp` auto-syncs via `#include "version.h"`, no manual change needed.
 
@@ -38,10 +38,26 @@ build\run\x64-release\voxmic.exe --list-devices  # List devices
 
 build.bat --rebuild              # Clean rebuild
 build.bat --clean                # Clean cmake/run/artifacts/logs (keeps packages)
-build.bat --package              # Build + Portable (.7z) + MSI
+build.bat --package              # Build + Portable (.7z) + MSI (RNNoise-only)
 build.bat --package-portable     # Build + Portable only
 build.bat --package-msi          # Build + MSI only
+build.bat --dpdfnet --package    # Build + package optional DPDFNet payload
+build.bat --dpdfnet --test-dpdfnet # Build + run DPDFNet smoke tests
 build.bat --require-signing ...  # Sign release (needs VOXMIC_SIGN_* env vars)
+```
+
+The optional DPDFNet payload is stored in `third_party/dpdfnet/` and large files
+are tracked with Git LFS. After cloning, run `git lfs pull` before
+`build.bat --dpdfnet`; the preparation script verifies and stages the vendored
+files into `build/cmake/x64-release/_deps/dpdfnet`. `build/` is disposable and
+can be cleaned without losing the dependency source. A pinned download/cache
+fallback remains only for a missing vendor directory.
+
+DPDFNet validation targets (after a DPDFNet build):
+```cmd
+build\cmake\x64-release\dpdfnet_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
+build\cmake\x64-release\dpdfnet_fallback_smoke.exe build\run\x64-release build\run\x64-release\models\missing-for-test.onnx
+build\cmake\x64-release\dpdfnet_pipeline_switch_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
 ```
 
 Toolchain: VS2022 C++ x64 (provides MSVC + CMake + Ninja), 7-Zip on PATH (for Portable), .NET SDK + WiX v4 SDK via NuGet (for MSI, no machine-level WiX install needed).
@@ -51,7 +67,7 @@ Toolchain: VS2022 C++ x64 (provides MSVC + CMake + Ninja), 7-Zip on PATH (for Po
 ```
 build/
 ├─ cmake/x64-release/   CMake/Ninja cache, objects, package staging
-├─ run/x64-release/     Sole runnable development payload (voxmic.exe + runtime-manifest.json)
+├─ run/x64-release/     Sole runnable development payload (RNNoise-only exe or optional DPDFNet payload)
 ├─ packages/            Verified .7z / .msi + .sha256 / .input.sha256 sidecars; preserved by --clean
 ├─ artifacts/           Verification / test / diagnostic reports
 ├─ logs/                Explicit build and test logs
@@ -102,13 +118,14 @@ src/
 +-- socket_client.h/cpp          # TCP socket client
 +-- adb_control.h/cpp            # ADB (CreateProcess + CREATE_NO_WINDOW)
 +-- tray_icon.h/cpp              # System tray + context menu
-+-- config.h/cpp                 # config.ini persistence (21 fields)
++-- config.h/cpp                 # config.ini persistence (20 fields)
 +-- settings_dialog.h/cpp        # Modeless settings window (incl. startup registration checkbox)
 +-- mic_usage_monitor.h/cpp      # Event-driven COM + IAudioMeterInformation silence fallback
 +-- startup_registration.h/cpp   # HKCU Run-key boot autostart (registry = single source of truth)
 +-- runtime_paths.h/cpp          # portable.flag detection + MutableDataDir (EXE dir vs %LOCALAPPDATA%\VoxMic)
 +-- dsp/
-    +-- pipeline.h               # DSP chain (RNNoise->HPF->EQ->Comp->Limiter)
+    +-- pipeline.h               # DSP chain (RNNoise/DPDFNet->HPF->EQ->Comp->Limiter)
+    +-- dpdfnet_processor.h/cpp  # Optional DPDFNet worker/FIFO adapter
     +-- biquad.h                 # BiQuad IIR
     +-- rnnoise/ (27 files)      # Official RNNoise v0.2 (C compiled, no external deps)
 
@@ -123,11 +140,18 @@ scripts/                         # Build/packaging PowerShell scripts
 +-- package_voxmic.ps1           # Portable (.7z) + MSI packaging with same-version protection
 +-- generate_wix_product_instance.ps1  # UUID v5 ProductCode/GUID derivation
 +-- generate_wix_runtime_fragment.ps1  # Generates RuntimeFiles.generated.wxs from payload
++-- prepare_dpdfnet_deps.ps1     # Verify vendored/downloaded DPDFNet dependencies and stage them
 +-- validate_build_layout.ps1    # build/ whitelist + runtime-manifest.json hash verification
 
 cmake/                           # CMake install rules
-+-- VoxMicRuntime.cmake          # Runtime install component (single-EXE payload)
++-- VoxMicRuntime.cmake          # Runtime install component (feature-dependent payload)
 +-- WriteRuntimeManifest.cmake.in  # runtime-manifest.json generation template
+
+third_party/dpdfnet/             # Pinned DPDFNet model/runtime/header source (Git LFS for model/DLLs)
++-- runtime/                     # sherpa-onnx and ONNX Runtime DLLs
++-- model/                       # dpdfnet2_48khz_hr.onnx
++-- include/                     # sherpa-onnx C API header
++-- metadata.json                # Dependency versions and SHA-256 values
 ```
 
 ## Thread Model
@@ -169,13 +193,18 @@ render:    ring buffer pop -> int16->float -> DspPipeline -> WASAPI write
 
 ### DSP Pipeline & Configuration
 
-DSP: RNNoise(22-Bark GRU) -> HPF(80Hz) -> EQ(6-band, Pres 0-6dB, Bass -6-0dB) -> Comp(-18dBFS, 3:1) -> Limiter(-1dBFS)
+DSP: selected RNNoise/DPDFNet denoiser -> HPF(80Hz) -> EQ(6-band, Pres 0-6dB, Bass -6-0dB) -> Comp(-18dBFS, 3:1) -> Limiter(-1dBFS)
 
 | Atomic Variable | Purpose | Thread |
 |-----------------|---------|--------|
 | `g_gain` | Gain multiplier | bridge -> render |
 | `g_nrEnabled` / `g_eqEnabled` / `g_compressorEnabled` | DSP toggles | bridge -> render |
 | `g_nrStrength` | NR denoising strength (0.3-0.95) | bridge -> render |
+| `g_denoiseBackend` | Requested backend (`rnnoise`/`dpdfnet`) | settings -> render |
+| `g_denoiseEffectiveBackend` | Effective backend after availability/fallback | render -> settings |
+| `g_dpdfnetAvailable` | DPDFNet runtime/model/session availability | render -> settings |
+| `g_dpdfnetDegraded` | Ready DPDFNet worker was stalled and is temporarily on RNNoise | render -> settings |
+| `g_denoiseResetEpoch` | Stream/backend reset notification | bridge/settings -> render |
 | `g_eqPresence` / `g_eqBassCut` | EQ parameters | bridge -> render |
 | `g_micRequested` | Whether app is capturing | monitor -> bridge |
 | `g_micStreaming` | Whether streaming | bridge -> tray |
@@ -183,7 +212,7 @@ DSP: RNNoise(22-Bark GRU) -> HPF(80Hz) -> EQ(6-band, Pres 0-6dB, Bass -6-0dB) ->
 | `g_demandMode` | Demand Mode toggle | tray -> monitor/bridge |
 | `g_alwaysHot` | Always Hot toggle | tray -> bridge |
 
-Configuration 21 fields, config.ini persistence. `syncDspAtomsFromConfig()` in `main.cpp`, called on startup and reconnect.
+Configuration 20 fields, config.ini persistence. `syncDspAtomsFromConfig()` in `main.cpp`, called on startup and reconnect.
 
 ### Monitor Three-layer Detection
 

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #define INI_SECTION "VoxMic"
 
@@ -59,6 +60,11 @@ static void writeIniFloat(const char* path, const char* key, float val) {
     WritePrivateProfileStringA(INI_SECTION, key, buf, path);
 }
 
+static std::string normalizeDenoiseBackend(const std::string& value) {
+    if (_stricmp(value.c_str(), "dpdfnet") == 0) return "dpdfnet";
+    return "rnnoise";
+}
+
 Config Config::load() {
     Config cfg;
     std::string path = getIniPath();
@@ -87,6 +93,8 @@ Config Config::load() {
     cfg.nrStrength = readIniFloat(path.c_str(), "NrStrength", 0.6f);
     if (cfg.nrStrength < 0.3f) cfg.nrStrength = 0.3f;
     if (cfg.nrStrength > 0.95f) cfg.nrStrength = 0.95f;
+    cfg.denoiseBackend = normalizeDenoiseBackend(
+        readIniString(path.c_str(), "DenoiseBackend", "rnnoise"));
     cfg.debugConsole = readIniInt(path.c_str(), "DebugConsole", 1) != 0;
     cfg.demandMode = readIniInt(path.c_str(), "DemandMode", 1) != 0;
     cfg.alwaysHot = readIniInt(path.c_str(), "AlwaysHot", 0) != 0;
@@ -113,6 +121,8 @@ void Config::save() const {
     writeIniInt(path.c_str(), "CompressorEnabled", compressorEnabled ? 1 : 0);
     writeIniInt(path.c_str(), "NrEnabled", nrEnabled ? 1 : 0);
     writeIniFloat(path.c_str(), "NrStrength", nrStrength);
+    writeIniString(path.c_str(), "DenoiseBackend",
+        normalizeDenoiseBackend(denoiseBackend).c_str());
     writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0);
     writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0);
     writeIniInt(path.c_str(), "AlwaysHot", alwaysHot ? 1 : 0);
