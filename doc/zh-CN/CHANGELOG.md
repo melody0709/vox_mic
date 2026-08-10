@@ -2,6 +2,18 @@
 
 **简体中文** | [English](../../CHANGELOG.md)
 
+## v0.6.6 (2026-08-10)
+
+### Settings 首次打开重绘
+
+| 修复 | 说明 |
+|------|------|
+| **初始 Tab 可见性** | 显式初始化 General/DSP 子控件可见性，窗口显示时只同步当前 Tab。 |
+| **Owner-draw 残影** | 隐藏 DPDFNet 状态控件时不再强制重绘，首次显示只重绘主窗口背景，避免状态文字出现在 General 控件上方。 |
+| **发布身份** | 桌面端/Android 升级为 `0.6.6` / Android `versionCode=12`。 |
+
+---
+
 ## v0.6.5 (2026-08-10)
 
 ### DPDFNet worker 加固

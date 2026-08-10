@@ -176,6 +176,12 @@ static void updateDenoiseBackendUi(HWND hWnd) {
     SendMessageA(status, WM_SETREDRAW, FALSE, 0);
     SetWindowTextA(status, statusText);
     SendMessageA(status, WM_SETREDRAW, TRUE, 0);
+
+    // The DSP controls are hidden while the General tab is active. Forcing
+    // an owner-draw repaint on a hidden static can leave its text painted in
+    // the parent window until the next tab switch repaints that area.
+    if (!IsWindowVisible(status)) return;
+
     RedrawWindow(status, nullptr, nullptr,
         RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
 }
@@ -614,6 +620,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         loadUiFromConfig(hWnd, cfg);
 
+        // Establish the initial tab visibility explicitly. Some owner-draw
+        // child controls can receive an initial paint while the parent is
+        // still being created, so do not rely only on the absence of
+        // WS_VISIBLE in their creation styles.
+        showTabControls(pData, 0);
+
         int btnY = 490;
         
         CreateWindowExA(0, "BUTTON", "Reset to Defaults",
@@ -638,8 +650,17 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_SHOWWINDOW:
         // 每次显示都重新查注册表（Portable 移动后旧值失效会被识别）。
         if (wParam) {
+            const int selectedTab = (pData && pData->hTab)
+                ? (int)SendMessageA(pData->hTab, TCM_GETCURSEL, 0, 0)
+                : 0;
+            if (pData) showTabControls(pData, selectedTab == 1 ? 1 : 0);
             refreshStartupRegistrationControl(hWnd);
             updateDenoiseBackendUi(hWnd);
+            // Repaint only the parent background here. Visible children are
+            // invalidated by ShowWindow or by their own targeted redraw;
+            // including hidden owner-draw children can reproduce the ghost.
+            RedrawWindow(hWnd, nullptr, nullptr,
+                RDW_ERASE | RDW_INVALIDATE | RDW_NOCHILDREN | RDW_UPDATENOW);
         }
         return 0;
 

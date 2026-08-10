@@ -2,6 +2,18 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
+## v0.6.6 (2026-08-10)
+
+### Settings first-open repaint
+
+| Fix | Description |
+|-----|-------------|
+| **Initial tab visibility** | Explicitly initializes the General/DSP child visibility and refreshes only the active tab when the Settings window is shown. |
+| **Owner-draw ghosting** | Avoids forcing a repaint on the hidden DPDFNet status control and repaints only the parent background during first display, preventing status text from appearing over General controls. |
+| **Release identity** | Bumped desktop/Android to `0.6.6` / Android `versionCode=12`. |
+
+---
+
 ## v0.6.5 (2026-08-10)
 
 ### DPDFNet worker hardening

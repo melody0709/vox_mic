@@ -210,3 +210,17 @@
 - 在测试构建中增加 `setEpoch()` 短路计数器，failure smoke 直接断言失败后 10 次调用全部被拦截；
 - 为 worker 自身调用 `failWorker()` 时的 auto-reset event 信号行为补充注释；
 - 未改变生产运行逻辑，DPDFNet 全量 smoke 测试重新通过。
+
+### Settings 首次打开残影修复
+
+- 原因：隐藏的 `SS_OWNERDRAW` 状态控件在首次加载时被强制 `RedrawWindow`，可能把状态文字绘制残留在父窗口区域；
+- 修复：状态控件隐藏时只更新文字，不执行强制 owner-draw 重绘；创建完成和窗口首次显示时显式同步 Tab 可见性，并对主窗口做一次完整重绘；控件显示后仍使用原有受控重绘逻辑；
+- 验证：DPDFNet smoke 全部通过，RNNoise-only Release 构建和 runtime layout 验证通过，并完成 fresh launch 首屏检查。
+
+发布验证：
+
+- 版本升级至 `0.6.6`，Android `versionCode=12`；
+- DPDFNet Portable/MSI 已重新生成并通过归档、runtime manifest、MSI 构建验证；
+- Android `VoxMic_Source-v0.6.6.apk` Release 构建通过；
+- MSI 构建结果为 0 Warning、0 Error；
+- `git diff --check` 通过。
