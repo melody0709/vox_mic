@@ -18,7 +18,7 @@ Version is unified in `src/version.h` (`APP_VERSION` macro). On each bump, modif
 |---|------|--------------|--------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | Sync `APP_VERSION` string |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (last=10) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (last=11) |
 
 `src/tray_icon.cpp` auto-syncs via `#include "version.h"`, no manual change needed.
 
@@ -58,7 +58,13 @@ DPDFNet validation targets (after a DPDFNet build):
 build\cmake\x64-release\dpdfnet_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
 build\cmake\x64-release\dpdfnet_fallback_smoke.exe build\run\x64-release build\run\x64-release\models\missing-for-test.onnx
 build\cmake\x64-release\dpdfnet_pipeline_switch_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
+build\cmake\x64-release\dpdfnet_failure_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
 ```
+
+The watchdog cannot cancel a native sherpa-onnx `Run()` call that never
+returns. The current worker is never detached before its denoiser/DLL resources
+are released; this remains a documented shutdown limitation until a future
+process-isolated adapter is available.
 
 Toolchain: VS2022 C++ x64 (provides MSVC + CMake + Ninja), 7-Zip on PATH (for Portable), .NET SDK + WiX v4 SDK via NuGet (for MSI, no machine-level WiX install needed).
 

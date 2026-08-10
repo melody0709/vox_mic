@@ -13,6 +13,12 @@ Android Phone Mic -> [VoxMic Source App] -> ADB -> This Program -> VB-CABLE -> W
                                     [DSP] RNNoise/DPDFNet -> HPF -> EQ -> Comp -> Limiter
 ```
 
+## v0.6.5 DPDFNet worker hardening
+
+The DPDFNet worker now converges cleanly after a hard failure: it clears its ready state, stops polling, and exits quickly when the processor is destroyed. Epoch hand-off now uses the input block's epoch tag so a new-epoch first block is reset and processed instead of being discarded; superseded epochs and stale inference results remain filtered. Invalid, oversized, or non-finite model output causes a hard fallback to RNNoise. Diagnostics and Settings distinguish disabled noise reduction (`off`) from RNNoise and DPDFNet.
+
+The failure smoke test covers failed-worker lifecycle, `setEpoch()` short-circuiting, and the sub-100 ms normal destructor path. A native DLL call that never returns remains a documented limitation; it is not handled by unsafe thread detachment.
+
 ## v0.6.4 DPDFNet resilience
 
 DPDFNet stream resets now preserve the first block submitted for the new epoch. Its worker output is also watched: up to four 10 ms warm-up blocks may be silent after a reset to keep the delayed stream aligned, but a steady worker that produces no output for three consecutive blocks automatically falls back to RNNoise instead of muting the microphone indefinitely. The Settings status and periodic diagnostics report the degraded state; clicking OK retries a ready-but-stalled worker, while a hard session failure requires a fresh prepare.
@@ -87,12 +93,12 @@ The vendored payload contains the sherpa-onnx C API header, three Windows x64 ru
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.4.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.5.apk"
 ```
 
 ## Performance
 
-| Metric | v0.6.4 |
+| Metric | v0.6.5 |
 |--------|--------|
 | CPU Idle | **0-0.1%** |
 | CPU Active | ~0.1% (DSP) |

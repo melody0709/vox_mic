@@ -13,6 +13,12 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
                                     [DSP] RNNoise/DPDFNet → HPF → EQ → Comp → Limiter
 ```
 
+## v0.6.5 DPDFNet worker 加固
+
+DPDFNet worker 硬失败后现在会正确清除 ready 状态、停止空转，并在销毁处理器时快速退出。epoch 交接改为依据输入 block 自带的 epoch 标签：新 epoch 首块会先 reset 后处理，不再被旧 `workerEpoch` 误丢弃；已经被更新 epoch 替代的输入和推理结果仍会被过滤。模型返回非法长度、超大输出或 NaN/Inf 时会触发硬失败并回退 RNNoise。诊断和设置页也会把降噪关闭状态显示为 `off`，不再误报 RNNoise/DPDFNet 正在运行。
+
+新增 failure smoke 覆盖失败 worker 生命周期、`setEpoch()` 短路和正常情况下小于 100ms 的析构路径。原生 DLL 调用永久不返回仍作为已知限制记录，不通过不安全的线程 detach 处理。
+
 ## v0.6.4 DPDFNet 稳定性优化
 
 修复 DPDFNet 流切换时 worker 可能清掉新 epoch 首块的问题，并增加输出存活监控：每次 reset 最多容忍 4 个 10ms 的模型预热静音块；稳态连续 3 个 block 无输出时自动降级到 RNNoise，避免 worker 卡住后持续整块静音。设置页和周期诊断会显示 degraded 状态，点击 OK 可重试仍可用但卡住的 worker；真正的 session 硬失败需要重新 prepare。
@@ -87,12 +93,12 @@ build.bat --dpdfnet --test-dpdfnet
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.4.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.5.apk"
 ```
 
 ## 性能
 
-| 指标 | v0.6.4 |
+| 指标 | v0.6.5 |
 |------|--------|
 | CPU 空闲 | **0-0.1%** |
 | CPU 激活 | ~0.1% (DSP) |

@@ -142,6 +142,8 @@ if "%TEST_DPDFNET%"=="1" (
     if errorlevel 1 ( echo DPDFNet fallback smoke FAILED. & exit /b 1 )
     "%BUILD_DIR%\dpdfnet_pipeline_switch_smoke.exe" "%RUN_DIR%" "%RUN_DIR%\models\dpdfnet2_48khz_hr.onnx"
     if errorlevel 1 ( echo DPDFNet pipeline switch smoke FAILED. & exit /b 1 )
+    "%BUILD_DIR%\dpdfnet_failure_smoke.exe" "%RUN_DIR%" "%RUN_DIR%\models\dpdfnet2_48khz_hr.onnx"
+    if errorlevel 1 ( echo DPDFNet failure smoke FAILED. & exit /b 1 )
     echo DPDFNet smoke tests passed.
 )
 

@@ -18,6 +18,7 @@ extern "C" {
 enum class DenoiseBackendKind : int {
     Rnnoise = 0,
     Dpdfnet = 1,
+    Off = 2,
 };
 
 extern std::atomic<float> g_gain;
@@ -80,8 +81,11 @@ public:
         m_seenGlobalEpoch = 0;
         m_streamEpoch = 1;
         resetDpdfnetWatchdog();
-        g_denoiseEffectiveBackend.store(
-            static_cast<int>(DenoiseBackendKind::Rnnoise),
+        const DenoiseBackendKind initialEffective = m_nrActive
+            ? DenoiseBackendKind::Rnnoise
+            : DenoiseBackendKind::Off;
+        m_activeBackend = initialEffective;
+        g_denoiseEffectiveBackend.store(static_cast<int>(initialEffective),
             std::memory_order_release);
         return true;
     }
@@ -106,7 +110,9 @@ public:
             m_nrActive = nrOn;
             m_lastRequestedBackend = requestedBackend;
             m_seenGlobalEpoch = globalEpoch;
-            m_activeBackend = chooseEffectiveBackend(requestedBackend);
+            m_activeBackend = nrOn
+                ? chooseEffectiveBackend(requestedBackend)
+                : DenoiseBackendKind::Off;
             g_denoiseEffectiveBackend.store(static_cast<int>(m_activeBackend),
                 std::memory_order_release);
         }
@@ -178,6 +184,10 @@ public:
 #if defined(VOXMIC_DPDFNET_TEST_HOOKS)
     void setDpdfnetWorkerDelayForTest(unsigned int delayMs) {
         m_dpdfnet.setWorkerDelayForTest(delayMs);
+    }
+
+    void forceDpdfnetFailureForTest() {
+        m_dpdfnet.forceFailureForTest();
     }
 #endif
 
@@ -280,6 +290,11 @@ private:
 
     void processFallback(float* samples, int numSamples, float sampleRate) {
         (void)sampleRate;
+        if (!m_loggedFallbackSize) {
+            printf("[DSP] warning: unsupported denoise block size=%d; denoise bypassed\n",
+                numSamples);
+            m_loggedFallbackSize = true;
+        }
         processPostDenoise(samples, numSamples);
     }
 
@@ -319,6 +334,7 @@ private:
     bool m_dpdfnetSeenOutput = false;
     unsigned int m_consecutiveDpdfnetUnderflows = 0;
     bool m_dpdfnetDegraded = false;
+    bool m_loggedFallbackSize = false;
     Biquad m_bq[6];
     CompState m_comp;
     float m_limiterGain = 1.0f;

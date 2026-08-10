@@ -1,6 +1,6 @@
 # DPDFNet 后端稳定性修复方案
 
-状态：待实施
+状态：实施中
 范围：DPDFNet worker、epoch 切换、失败状态、输出校验、状态显示和回归测试
 当前版本：0.6.4
 
@@ -57,7 +57,7 @@
 - 输入 block 的 `epoch` 作为该 block 的权威标签；
 - pop 后发现 `input.epoch < workerEpoch`：丢弃，属于旧 epoch；
 - pop 后发现 `input.epoch > workerEpoch`：先对 `input.epoch` 执行 `resetWorkerState()`，然后继续处理当前 block；
-- 如果 `requestedEpoch` 已经更新到更晚 epoch，需在处理前再次比较，避免处理已经被后续 reset 覆盖的 block；
+- 如果 `requestedEpoch` 已经更新到更晚 epoch，当前 block 属于已被 superseded 的 epoch，可以丢弃；实现必须在处理前再次比较，避免处理已经被后续 reset 覆盖的 block；
 - 推理返回后继续保留现有的 requested epoch 二次检查，旧结果不得进入 output FIFO；
 - 不恢复 reset 时清空 input queue 的做法，继续依靠 epoch 标签过滤旧输入。
 
@@ -73,7 +73,7 @@
 - `audio->n >= 0`；
 - `audio->n == 0` 时允许空输出；
 - `audio->n > 0` 时 `audio->samples != nullptr`；
-- 输出长度不超过一个合理的 FIFO 安全上限；
+- 输出长度不超过经过 smoke/运行时观测确认的安全上限；第一版可用 `DPDFNET_BLOCK_SAMPLES * 4`（1920 samples）作为暂定阈值，若实测模型存在合法更大输出再调整；
 - 所有输出 sample 都是 finite，拒绝 NaN/Inf。
 
 异常响应统一销毁 audio 对象后调用 `failWorker()`，不得把坏数据送入 output FIFO。
@@ -89,7 +89,7 @@
 - worker 返回 NaN/Inf；
 - `failWorker()` 后 `isReady()==false`、`hasFailed()==true`；
 - fail 后调用 `setEpoch()` 不再更新/唤醒失败 worker；
-- fail 后析构能够在短时间内完成，不发生 20ms 空转；
+- fail 后析构在正常可返回的 worker 场景下应小于 100ms，不发生 20ms 空转；
 - reset 与新 epoch 首块高频交错时，首块不会因旧 `workerEpoch` 被误丢弃。
 
 保留并继续运行现有测试：
@@ -111,6 +111,7 @@
 
 - 不使用 detach、强制终止线程或超时后释放 denoiser/DLL；
 - 在开发文档中明确记录：原生 API 卡死时，音频路径可降级，但进程退出可能受 worker join 影响；
+- 自动化测试只覆盖 Run 返回异常值（sample rate、长度、NaN/Inf）；Run 永久不返回不能放入普通自动化测试，改为文档化已知限制并通过人工/隔离实验验证；
 - 增加正常退出、高负载退出、模型加载异常和 DLL 异常场景测试；
 - 记录后续方案：DPDFNet adapter 放入独立子进程，通过 IPC/共享内存传输 480-sample block，子进程可被安全回收。
 
@@ -122,11 +123,12 @@
 
 当前 NR 关闭时仍可能把 `g_denoiseEffectiveBackend` 设置成 DPDFNet，但实际 pipeline 在 `!nrOn` 分支直接跳过降噪。
 
-建议增加 `DenoiseBackendKind::Off`，并满足：
+建议增加 `DenoiseBackendKind::Off = 2`，并满足：
 
 - NR 关闭时 effective backend 为 Off；
 - Stats 显示 `denoise=off`；
 - Settings 显示“Noise reduction is disabled”，不误报 DPDFNet 正在运行；
+- 同步修改 `main.cpp:116-120` 的 Stats 映射、`settings_dialog.cpp:157-160` 的状态分支，以及所有测试中的 effective backend 判断；不得继续使用“不是 DPDFNet 就当 RNNoise”的隐式映射；
 - 重新打开 NR 后，按请求 backend 和可用性重新选择 RNNoise/DPDFNet；
 - 不改变 `DenoiseBackend` 配置持久化格式，配置仍只保存 `rnnoise|dpdfnet`。
 
@@ -175,8 +177,36 @@
 - NaN/Inf/非法音频响应触发 hard-fail 并安全回退 RNNoise；
 - render 线程仍不执行阻塞 DLL/模型 I/O；
 - NR 关闭时 Stats/Settings 显示 Off 而不是 DPDFNet；
+- `DenoiseBackendKind::Off` 的所有生产和测试消费者均能正确显示/断言 Off；
 - UI 状态文本切换无重叠和明显闪烁；
 - RNNoise-only 构建仍只有 exe/manifest；
 - DPDFNet 构建、fallback、切换、failure、退出测试全部通过；
 - `build/` 清理后仍可从 `third_party/dpdfnet` 重新生成依赖；
 - 版本和打包输入摘要一致，未覆盖 0.6.4 产物。
+
+## 实施约束补充
+
+- `failWorker()` 的原子状态更新顺序固定为 `failed=true` → `ready=false` → 唤醒 event；
+- 不使用 `detach`、强制终止线程或 `std::terminate` 解决 `Run()` 阻塞；
+- epoch 修复必须保留“输入 block 标签判断”和“推理返回后的二次 requested epoch 判断”两道保护；
+- hard-fail 的输出上限先采用 1920 samples，所有阈值变更必须同步 smoke 测试和文档。
+
+## 实施状态
+
+已完成（2026-08-10）：
+
+- 版本已升级到 `0.6.5`，Android `versionCode=11`；
+- worker failure 收敛、epoch 首块处理和输出合法性校验已实现；
+- 增加 failure smoke，并通过 DPDFNet、fallback、pipeline switch、failure 全部测试；
+- NR Off 状态、Settings 文本重绘和非 480 block 警告已同步；
+- README、架构、变更记录、构建/开发文档已更新；
+- RNNoise-only 构建、DPDFNet 构建、runtime layout 和 0.6.5 Portable/MSI 打包均已验证；
+- `Run()` 永久阻塞仍作为已知限制记录，未采用 detach、强杀线程或 `std::terminate`。
+
+验收结果：通过。
+
+### 收尾轻量优化
+
+- 在测试构建中增加 `setEpoch()` 短路计数器，failure smoke 直接断言失败后 10 次调用全部被拦截；
+- 为 worker 自身调用 `failWorker()` 时的 auto-reset event 信号行为补充注释；
+- 未改变生产运行逻辑，DPDFNet 全量 smoke 测试重新通过。

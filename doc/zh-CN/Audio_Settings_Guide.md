@@ -67,7 +67,7 @@
     *   **嘈杂环境（推荐开启）**：降噪效果极好，但代价是会稍微吃掉一点高频（导致声音变闷）。**必须配合调高 `Presence` 来使用**。
 *   **安静房间（推荐关闭）**：如果你的房间本来就很安静，关闭它可以获得最完美、最保真的广播级人声音质。
 
-选择 DPDFNet 后，`NR Strength` 会被禁用，因为当前在线 DPDFNet 模型没有可直接映射的强度参数；切换回 RNNoise 后，原来的 RNNoise 强度值会恢复。DPDFNet 的模型、CPU provider 和推理线程数由发布载荷固定，不建议在 Settings 中暴露。
+关闭 `Noise Reduction` 时，实际降噪后端会显示为 `off`，但 RNNoise/DPDFNet 的选择仍会保存；重新开启后会重新应用选择。选择 DPDFNet 后，`NR Strength` 会被禁用，因为当前在线 DPDFNet 模型没有可直接映射的强度参数；切换回 RNNoise 后，原来的 RNNoise 强度值会恢复。DPDFNet 的模型、CPU provider 和推理线程数由发布载荷固定，不建议在 Settings 中暴露。
 
 如果 DPDFNet worker 在流切换后的短暂预热期没有立即产出，最多会保留 4 个 10ms 静音块以维持时间对齐；稳态连续 3 个 block 无输出时会自动降级到 RNNoise。设置页会显示 degraded 状态，点击 OK 或下一次流 reset（例如重连、重新激活或重新选择后端）会再次尝试仍可用的 DPDFNet worker；session 硬失败则需要重新 prepare。
 

@@ -47,6 +47,10 @@ public:
 
 #if defined(VOXMIC_DPDFNET_TEST_HOOKS)
     void setWorkerDelayForTest(unsigned int delayMs);
+    void forceFailureForTest();
+    void injectInvalidOutputForTest(int faultKind);
+    bool validationTestFailedForTest() const;
+    uint64_t epochShortCircuitsForTest() const;
 #endif
 
 private:

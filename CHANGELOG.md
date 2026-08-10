@@ -2,6 +2,23 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
+## v0.6.5 (2026-08-10)
+
+### DPDFNet worker hardening
+
+| Fix | Description |
+|-----|-------------|
+| **Failure convergence** | A failed worker clears `ready`, stops its periodic empty-loop polling, and exits quickly when stopped; `setEpoch()` no longer operates on a failed session. |
+| **Epoch hand-off** | A newly popped epoch block is reset and processed using its own tag; blocks superseded by a later requested epoch and stale inference results are discarded. |
+| **Output validation** | Oversized, malformed, or non-finite DPDFNet output triggers hard fallback to RNNoise before entering the output FIFO. |
+| **Effective status** | Added an explicit `off` effective backend state so Stats and Settings do not report DPDFNet when noise reduction is disabled. |
+| **Regression coverage** | Added failure lifecycle smoke coverage, including failed state convergence, epoch short-circuiting, and normal destructor latency. |
+| **Release identity** | Bumped desktop/Android to `0.6.5` / Android `versionCode=11`. |
+
+The native DPDFNet API can still theoretically block forever inside `Run()`. This remains documented as a limitation; the implementation does not detach or forcibly terminate a thread holding DLL/session resources.
+
+---
+
 ## v0.6.4 (2026-08-09)
 
 ### DPDFNet retry/status correctness

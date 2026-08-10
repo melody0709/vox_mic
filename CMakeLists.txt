@@ -163,4 +163,14 @@ if(VOXMIC_ENABLE_DPDFNET)
         VOXMIC_ENABLE_DPDFNET=1 VOXMIC_DPDFNET_TEST_HOOKS=1)
     target_compile_options(dpdfnet_pipeline_switch_smoke PRIVATE
         /O2 /EHsc /W4 /WX- /wd4305 /wd4244 /utf-8)
+
+    add_executable(dpdfnet_failure_smoke
+        tests/dpdfnet_failure_smoke.cpp
+        src/dsp/dpdfnet_processor.cpp)
+    target_include_directories(dpdfnet_failure_smoke PRIVATE
+        src "${VOXMIC_DPDFNET_INCLUDE_DIR}")
+    target_compile_definitions(dpdfnet_failure_smoke PRIVATE
+        VOXMIC_ENABLE_DPDFNET=1 VOXMIC_DPDFNET_TEST_HOOKS=1)
+    target_compile_options(dpdfnet_failure_smoke PRIVATE
+        /O2 /EHsc /W4 /WX- /utf-8)
 endif()

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -154,6 +155,7 @@ struct DpdfnetProcessor::Impl {
 #if VOXMIC_ENABLE_DPDFNET
     static constexpr size_t QUEUE_CAPACITY = 32;
     static constexpr size_t FIFO_CAPACITY = DPDFNET_BLOCK_SAMPLES * 64;
+    static constexpr int MAX_OUTPUT_SAMPLES = DPDFNET_BLOCK_SAMPLES * 4;
 
     SherpaOnnxApi api;
     const SherpaOnnxOnlineSpeechDenoiser* denoiser = nullptr;
@@ -172,7 +174,6 @@ struct DpdfnetProcessor::Impl {
     size_t outputFifoCount = 0;
 
     int expectedSampleRate = 48000;
-    int expectedFrameShift = DPDFNET_BLOCK_SAMPLES;
     std::atomic<uint64_t> inputDrops{0};
     std::atomic<uint64_t> outputDrops{0};
     std::atomic<uint64_t> outputUnderflows{0};
@@ -180,6 +181,10 @@ struct DpdfnetProcessor::Impl {
     LARGE_INTEGER qpcFrequency{};
 #if defined(VOXMIC_DPDFNET_TEST_HOOKS)
     std::atomic<unsigned int> testWorkerDelayMs{0};
+    std::atomic<bool> testForceFailure{false};
+    std::atomic<int> testOutputFault{0};
+    std::atomic<bool> testValidationFailed{false};
+    std::atomic<uint64_t> testEpochShortCircuits{0};
 #endif
 
     void signalWorker() {
@@ -188,7 +193,23 @@ struct DpdfnetProcessor::Impl {
 
     void failWorker() {
         failed.store(true, std::memory_order_release);
+        ready.store(false, std::memory_order_release);
+        // If failure is reported on the worker itself, this auto-reset event
+        // signal may be consumed by the next failed-state wait. That extra
+        // wake is intentional; the following wait blocks until stopWorker().
         signalWorker();
+    }
+
+    bool validAudio(const SherpaOnnxDenoisedAudio* audio) const {
+        if (!audio || audio->sample_rate != expectedSampleRate ||
+            audio->n < 0 || audio->n > MAX_OUTPUT_SAMPLES ||
+            (audio->n > 0 && audio->samples == nullptr)) {
+            return false;
+        }
+        for (int32_t i = 0; i < audio->n; ++i) {
+            if (!std::isfinite(audio->samples[i])) return false;
+        }
+        return true;
     }
 
     void resetWorkerState(uint64_t epoch) {
@@ -237,7 +258,7 @@ struct DpdfnetProcessor::Impl {
         const SherpaOnnxDenoisedAudio* warmupAudio = api.run(
             denoiser, warmup, DPDFNET_BLOCK_SAMPLES, expectedSampleRate);
         if (warmupAudio) {
-            if (warmupAudio->sample_rate != expectedSampleRate) {
+            if (!validAudio(warmupAudio)) {
                 api.destroyAudio(warmupAudio);
                 failWorker();
             } else {
@@ -248,10 +269,23 @@ struct DpdfnetProcessor::Impl {
             api.reset(denoiser);
             workerEpoch = requestedEpoch.load(std::memory_order_acquire);
         }
-        ready.store(true, std::memory_order_release);
+        ready.store(!failed.load(std::memory_order_acquire),
+            std::memory_order_release);
         if (readyEvent) SetEvent(readyEvent);
 
         while (!stop.load(std::memory_order_acquire)) {
+            if (failed.load(std::memory_order_acquire)) {
+                if (wakeEvent) WaitForSingleObject(wakeEvent, INFINITE);
+                continue;
+            }
+
+#if defined(VOXMIC_DPDFNET_TEST_HOOKS)
+            if (testForceFailure.exchange(false, std::memory_order_acq_rel)) {
+                failWorker();
+                continue;
+            }
+#endif
+
             const uint64_t requested = requestedEpoch.load(std::memory_order_acquire);
             if (requested != workerEpoch) {
                 resetWorkerState(requested);
@@ -262,7 +296,20 @@ struct DpdfnetProcessor::Impl {
                 if (wakeEvent) WaitForSingleObject(wakeEvent, 20);
                 continue;
             }
-            if (input.epoch != workerEpoch || failed.load(std::memory_order_acquire)) {
+
+            if (failed.load(std::memory_order_acquire)) {
+                continue;
+            }
+
+            if (input.epoch < workerEpoch) continue;
+            if (input.epoch > workerEpoch) {
+                const uint64_t requestedAfterPop =
+                    requestedEpoch.load(std::memory_order_acquire);
+                if (requestedAfterPop > input.epoch) continue;
+                resetWorkerState(input.epoch);
+            }
+            if (input.epoch != workerEpoch ||
+                requestedEpoch.load(std::memory_order_acquire) != workerEpoch) {
                 continue;
             }
 
@@ -286,9 +333,34 @@ struct DpdfnetProcessor::Impl {
                     std::memory_order_relaxed);
             }
 
+#if defined(VOXMIC_DPDFNET_TEST_HOOKS)
+            const int testFault = testOutputFault.exchange(0,
+                std::memory_order_acq_rel);
+            if (testFault != 0) {
+                if (audio) api.destroyAudio(audio);
+                float finiteSample = 0.0f;
+                float nonFiniteSample = std::numeric_limits<float>::quiet_NaN();
+                SherpaOnnxDenoisedAudio synthetic{
+                    &finiteSample, 1, expectedSampleRate};
+                if (testFault == 1) {
+                    synthetic.sample_rate = expectedSampleRate + 1;
+                } else if (testFault == 2) {
+                    synthetic.n = MAX_OUTPUT_SAMPLES + 1;
+                } else if (testFault == 3) {
+                    synthetic.samples = nullptr;
+                } else if (testFault == 4) {
+                    synthetic.samples = &nonFiniteSample;
+                }
+                if (validAudio(&synthetic)) {
+                    testValidationFailed.store(true, std::memory_order_release);
+                }
+                failWorker();
+                continue;
+            }
+#endif
+
             if (!audio) continue;
-            if (audio->sample_rate != expectedSampleRate || audio->n < 0 ||
-                (audio->n > 0 && audio->samples == nullptr)) {
+            if (!validAudio(audio)) {
                 api.destroyAudio(audio);
                 failWorker();
                 continue;
@@ -321,6 +393,7 @@ struct DpdfnetProcessor::Impl {
             api.destroy(denoiser);
             denoiser = nullptr;
         }
+        ready.store(false, std::memory_order_release);
         api.unload();
     }
 #endif
@@ -353,7 +426,6 @@ bool DpdfnetProcessor::prepare(const std::wstring& runtimeDirectory,
     m_impl->failed.store(false, std::memory_order_release);
     m_impl->ready.store(false, std::memory_order_release);
     m_impl->expectedSampleRate = expectedSampleRate;
-    m_impl->expectedFrameShift = expectedFrameShift;
     m_impl->inputQueue.discardAll();
     m_impl->outputQueue.discardAll();
     m_impl->outputFifoCount = 0;
@@ -361,6 +433,9 @@ bool DpdfnetProcessor::prepare(const std::wstring& runtimeDirectory,
     m_impl->outputDrops.store(0, std::memory_order_relaxed);
     m_impl->outputUnderflows.store(0, std::memory_order_relaxed);
     m_impl->workerProcUsEma.store(0.0, std::memory_order_relaxed);
+#if defined(VOXMIC_DPDFNET_TEST_HOOKS)
+    m_impl->testEpochShortCircuits.store(0, std::memory_order_relaxed);
+#endif
     QueryPerformanceFrequency(&m_impl->qpcFrequency);
 
     std::wstring absoluteRuntimeDirectory = runtimeDirectory;
@@ -500,7 +575,14 @@ bool DpdfnetProcessor::prepare(const std::wstring& runtimeDirectory,
 
 void DpdfnetProcessor::setEpoch(uint64_t epoch) {
 #if VOXMIC_ENABLE_DPDFNET
-    if (!m_impl->ready.load(std::memory_order_acquire)) return;
+    if (!m_impl->ready.load(std::memory_order_acquire) ||
+        m_impl->failed.load(std::memory_order_acquire)) {
+#if defined(VOXMIC_DPDFNET_TEST_HOOKS)
+        m_impl->testEpochShortCircuits.fetch_add(1,
+            std::memory_order_relaxed);
+#endif
+        return;
+    }
     m_impl->requestedEpoch.store(epoch, std::memory_order_release);
     // The output queue is consumed by the render thread, so it is safe for
     // this side to discard old output immediately.  The worker tags every new
@@ -609,6 +691,38 @@ void DpdfnetProcessor::setWorkerDelayForTest(unsigned int delayMs) {
     m_impl->testWorkerDelayMs.store(delayMs, std::memory_order_relaxed);
 #else
     (void)delayMs;
+#endif
+}
+
+void DpdfnetProcessor::forceFailureForTest() {
+#if VOXMIC_ENABLE_DPDFNET
+    m_impl->testForceFailure.store(true, std::memory_order_release);
+    m_impl->signalWorker();
+#endif
+}
+
+void DpdfnetProcessor::injectInvalidOutputForTest(int faultKind) {
+#if VOXMIC_ENABLE_DPDFNET
+    m_impl->testOutputFault.store(faultKind, std::memory_order_release);
+    m_impl->signalWorker();
+#else
+    (void)faultKind;
+#endif
+}
+
+bool DpdfnetProcessor::validationTestFailedForTest() const {
+#if VOXMIC_ENABLE_DPDFNET
+    return m_impl->testValidationFailed.load(std::memory_order_acquire);
+#else
+    return false;
+#endif
+}
+
+uint64_t DpdfnetProcessor::epochShortCircuitsForTest() const {
+#if VOXMIC_ENABLE_DPDFNET
+    return m_impl->testEpochShortCircuits.load(std::memory_order_relaxed);
+#else
+    return 0;
 #endif
 }
 #endif

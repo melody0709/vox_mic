@@ -16,6 +16,7 @@ extern std::atomic<bool> g_demandMode;
 extern std::atomic<bool> g_alwaysHot;
 extern std::atomic<bool> g_dpdfnetAvailable;
 extern std::atomic<bool> g_dpdfnetDegraded;
+extern std::atomic<bool> g_nrEnabled;
 extern std::atomic<int> g_denoiseBackend;
 extern std::atomic<int> g_denoiseEffectiveBackend;
 extern TrayIcon* g_trayIcon;
@@ -132,15 +133,20 @@ static void updateDenoiseBackendUi(HWND hWnd) {
 
     const int selection = (int)SendMessageA(combo, CB_GETCURSEL, 0, 0);
     const bool dpdfnetRequested = selection == 1;
-    EnableWindow(strength, dpdfnetRequested ? FALSE : TRUE);
-    EnableWindow(strengthLabel, dpdfnetRequested ? FALSE : TRUE);
+    const bool nrEnabled = g_nrEnabled.load(std::memory_order_acquire);
+    EnableWindow(strength, (!nrEnabled || dpdfnetRequested) ? FALSE : TRUE);
+    EnableWindow(strengthLabel, (!nrEnabled || dpdfnetRequested) ? FALSE : TRUE);
 
     const int activeRequestedBackend = g_denoiseBackend.load(
         std::memory_order_acquire);
     const bool selectionIsApplied = activeRequestedBackend ==
         (dpdfnetRequested ? 1 : 0);
     const char* statusText = nullptr;
-    if (!dpdfnetRequested) {
+    if (!nrEnabled) {
+        statusText = selectionIsApplied
+            ? "Noise reduction is disabled; the selected backend will apply when enabled."
+            : "Noise reduction is disabled; click OK to save the selected backend.";
+    } else if (!dpdfnetRequested) {
         statusText = selectionIsApplied
             ? "RNNoise is the active built-in backend."
             : "RNNoise is selected; click OK to apply it.";
@@ -167,10 +173,9 @@ static void updateDenoiseBackendUi(HWND hWnd) {
     // The status text changes while the window remains open. Clear first and
     // force an immediate repaint so a shorter replacement cannot leave glyphs
     // from the previous message behind.
-    SetWindowTextA(status, "");
-    RedrawWindow(status, nullptr, nullptr,
-        RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
+    SendMessageA(status, WM_SETREDRAW, FALSE, 0);
     SetWindowTextA(status, statusText);
+    SendMessageA(status, WM_SETREDRAW, TRUE, 0);
     RedrawWindow(status, nullptr, nullptr,
         RDW_ERASE | RDW_INVALIDATE | RDW_UPDATENOW);
 }

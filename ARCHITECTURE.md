@@ -66,8 +66,9 @@ voxmic.exe
 [1] Selected denoiser <- g_nrEnabled + DenoiseBackend control
     - RNNoise: rnnoise_process_frame(st, out, in), adjustable `NR Strength`
     - DPDFNet: 48 kHz online ONNX model on a dedicated worker; variable API output is buffered into fixed 480-sample blocks
-    - New-epoch input is retained across a worker reset; old-tagged input/result blocks are discarded without calling the model
+    - New-epoch input is reset and processed using its own tag; old-tagged or superseded input/result blocks are discarded without entering the active FIFO
     - DPDFNet DLL/model/ABI failure or worker stall falls back to RNNoise without stopping the audio path
+    - Malformed, oversized, or non-finite model output hard-fails the session before FIFO insertion
     - At reset, up to four empty 10ms blocks are allowed for model context; three consecutive steady-state empty blocks mark the worker degraded and use RNNoise
     - 3-layer GRU (96+96+96), 22 Bark bands, 85KB quantized weights
     - Per-band independent gain + comb filtering + VAD probability
@@ -102,7 +103,7 @@ voxmic.exe
 | Bass Cut | -3.0 dB | `g_eqBassCut` | slider -6-0dB |
 | Comp Enable | true | `g_compressorEnabled` | checkbox |
 
-`NR Strength` is preserved in `config.ini` for RNNoise compatibility and is disabled in the UI when DPDFNet is selected. The requested backend remains persisted even when DPDFNet resources are unavailable; the effective backend is reported separately and remains RNNoise until the resources are restored. `g_dpdfnetDegraded` distinguishes a ready-but-stalled worker from a missing runtime and is cleared for a retry at the next stream reset. DPDFNet's online API does not expose a model-strength slider; VoxMic pins the 48 kHz `dpdfnet2_48khz_hr` model, CPU provider, one inference thread, and debug off. Those are packaging/developer choices, not Settings controls.
+`NR Strength` is preserved in `config.ini` for RNNoise compatibility and is disabled in the UI when DPDFNet is selected. When NR is disabled, the effective backend is `off`; the requested backend remains persisted and is applied again when NR is enabled. The requested backend also remains persisted when DPDFNet resources are unavailable; the effective backend is reported separately and remains RNNoise until a fresh prepare succeeds. `g_dpdfnetDegraded` distinguishes a ready-but-stalled worker from a missing runtime and is cleared for a retry at the next stream reset. DPDFNet's online API does not expose a model-strength slider; VoxMic pins the 48 kHz `dpdfnet2_48khz_hr` model, CPU provider, one inference thread, and debug off. Those are packaging/developer choices, not Settings controls.
 
 ## Phase 3+8: On-demand Activation + Event-driven
 
@@ -123,8 +124,10 @@ main thread:         Message pump + SetTimer(stats, 5s)
 monitor thread:      Sleep(1000) only keeps COM apartment alive (Phase 8 event-driven)
 bridge thread:       ADB one-time init (CreateProcess NO_WINDOW) + Socket on-demand connection (idle 5s disconnect, connect ~0.4ms) -> g_micRequested gate -> ring buffer push/discard
 render thread:       Event-driven ring buffer pop -> int16->float -> DspPipeline -> WASAPI write
-DPDFNet worker:      tagged SPSC input queue -> sherpa-onnx Run() -> tagged output FIFO -> fixed 480-sample blocks; reset preserves new-epoch input, watchdog protects render; no DLL/model I/O on render
+DPDFNet worker:      tagged SPSC input queue -> epoch-aware reset -> sherpa-onnx Run() -> validated tagged output FIFO -> fixed 480-sample blocks; failed worker blocks until stop; no DLL/model I/O on render
 ```
+
+The watchdog cannot cancel a native `Run()` call that never returns. Such a call remains a known shutdown limitation; the current implementation never detaches the worker before releasing its denoiser/DLL resources. A future process-isolated adapter is required for hard cancellation.
 
 ## Latency Budget
 

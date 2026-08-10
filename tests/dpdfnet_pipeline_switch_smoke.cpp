@@ -155,6 +155,46 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Disabling NR must report an explicit Off effective state instead of
+    // claiming that the selected backend is actively processing audio.
+    g_nrEnabled.store(false, std::memory_order_release);
+    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    if (!processOne(pipeline, block++, 0) ||
+        g_denoiseEffectiveBackend.load(std::memory_order_acquire) !=
+            static_cast<int>(DenoiseBackendKind::Off)) {
+        std::printf("ERROR: disabled NR did not report effective backend Off\n");
+        return 1;
+    }
+
+    g_nrEnabled.store(true, std::memory_order_release);
+    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    if (!runDpdfnetEpoch(pipeline, block, 70, 10, 55)) {
+        std::printf("ERROR: DPDFNet did not recover after re-enabling NR\n");
+        return 1;
+    }
+
+    // A hard worker failure must be visible as unavailable, not retryable
+    // degraded, and the pipeline must remain on RNNoise.
+    pipeline.forceDpdfnetFailureForTest();
+    bool hardFailed = false;
+    for (int i = 0; i < 200; ++i, ++block) {
+        if (!processOne(pipeline, block, 1)) {
+            std::printf("ERROR: hard-failure test produced non-finite output\n");
+            return 1;
+        }
+        if (!g_dpdfnetAvailable.load(std::memory_order_acquire) &&
+            !g_dpdfnetDegraded.load(std::memory_order_acquire) &&
+            g_denoiseEffectiveBackend.load(std::memory_order_acquire) ==
+                static_cast<int>(DenoiseBackendKind::Rnnoise)) {
+            hardFailed = true;
+            break;
+        }
+    }
+    if (!hardFailed) {
+        std::printf("ERROR: hard worker failure did not converge to unavailable/RNNoise\n");
+        return 1;
+    }
+
     if (pipeline.dpdfnetInputDrops() != 0 || pipeline.dpdfnetOutputDrops() != 0) {
         std::printf("ERROR: DPDFNet FIFO drops detected (input=%llu output=%llu)\n",
             static_cast<unsigned long long>(pipeline.dpdfnetInputDrops()),
@@ -162,7 +202,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("DPDFNet pipeline switch smoke OK: resets=7 watchdog=1 underflows=%llu worker=%.1fus\n",
+    std::printf("DPDFNet pipeline switch smoke OK: watchdog=1 hard_failure=1 underflows=%llu worker=%.1fus\n",
         static_cast<unsigned long long>(pipeline.dpdfnetUnderflows()),
         pipeline.dpdfnetWorkerProcUsEma());
     return 0;

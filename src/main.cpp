@@ -115,8 +115,12 @@ VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
     const int effectiveBackend = g_denoiseEffectiveBackend.load(
         std::memory_order_relaxed);
-    const char* denoiseName = (effectiveBackend ==
-        static_cast<int>(DenoiseBackendKind::Dpdfnet)) ? "dpdfnet" : "rnnoise";
+    const char* denoiseName = "rnnoise";
+    if (effectiveBackend == static_cast<int>(DenoiseBackendKind::Dpdfnet)) {
+        denoiseName = "dpdfnet";
+    } else if (effectiveBackend == static_cast<int>(DenoiseBackendKind::Off)) {
+        denoiseName = "off";
+    }
     printf("[Stats] state=%s recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu proc=%.0fus lat=%.1fms denoise=%s dpdf(avail=%d degraded=%d uf=%llu inDrop=%llu outDrop=%llu worker=%.0fus)\n",
         bridgeStatusName(g_bridgeStatus.load(std::memory_order_relaxed)),
         g_wasapiOutput->receivedBlocks.load(),

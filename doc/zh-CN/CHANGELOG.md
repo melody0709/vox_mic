@@ -2,6 +2,23 @@
 
 **简体中文** | [English](../../CHANGELOG.md)
 
+## v0.6.5 (2026-08-10)
+
+### DPDFNet worker 加固
+
+| 修复 | 说明 |
+|------|------|
+| **失败状态收敛** | worker 硬失败后清除 `ready` 状态、停止周期性空转；`setEpoch()` 不再操作失败 session，正常停止时快速退出。 |
+| **Epoch 交接** | 新 pop 的 block 以自身 epoch 标签为准先 reset 后处理；被更晚 epoch 替代的输入和过期推理结果会被丢弃。 |
+| **输出校验** | 超大、非法或包含 NaN/Inf 的 DPDFNet 输出在进入 FIFO 前触发硬失败并回退 RNNoise。 |
+| **实际状态** | 增加 `off` effective backend，降噪关闭时 Settings/Stats 不再误报 DPDFNet 正在运行。 |
+| **回归覆盖** | 新增 failure lifecycle smoke，覆盖失败状态收敛、epoch 短路和正常析构耗时。 |
+| **发布身份** | 桌面端/Android 升级为 `0.6.5` / Android `versionCode=11`。 |
+
+原生 DPDFNet API 理论上仍可能在 `Run()` 内永久阻塞；该情况作为已知限制记录，不通过 detach 或强制终止持有 DLL/session 资源的线程来处理。
+
+---
+
 ## v0.6.4 (2026-08-09)
 
 ### DPDFNet 重试与状态修正

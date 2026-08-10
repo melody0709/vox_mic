@@ -18,7 +18,7 @@
 |---|------|---------|------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | 同步 `APP_VERSION` 字符串 |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=10) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=11) |
 
 `src/tray_icon.cpp` 已通过 `#include "version.h"` 自动同步，无需手动修改。
 
@@ -40,7 +40,10 @@ DPDFNet 验证目标（执行 DPDFNet 构建后）：
 build\cmake\x64-release\dpdfnet_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
 build\cmake\x64-release\dpdfnet_fallback_smoke.exe build\run\x64-release build\run\x64-release\models\missing-for-test.onnx
 build\cmake\x64-release\dpdfnet_pipeline_switch_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
+build\cmake\x64-release\dpdfnet_failure_smoke.exe build\run\x64-release build\run\x64-release\models\dpdfnet2_48khz_hr.onnx
 ```
+
+watchdog 无法取消永久不返回的原生 sherpa-onnx `Run()` 调用。当前实现不会在释放 denoiser/DLL 资源前 detach worker；在未来完成进程隔离适配器前，这仍是已知的退出限制。
 
 Android App (SDK `D:\@APP\android-platform-sdk\android-sdk`, Gradle 8.7, JDK 17):
 ```powershell

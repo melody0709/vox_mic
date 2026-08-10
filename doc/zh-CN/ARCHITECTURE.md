@@ -66,8 +66,9 @@ voxmic.exe
 [1] 可选降噪后端  ← g_nrEnabled + DenoiseBackend 控制
     • RNNoise: rnnoise_process_frame(st, out, in)，支持 NR Strength
     • DPDFNet: 48 kHz 在线 ONNX 模型运行于独立 worker，变长输出放入 FIFO，再整理为固定 480 帧
-    • reset 时保留新 epoch 输入；旧 epoch 的输入/结果按 tag 丢弃，避免切换首块竞态
+    • 新 epoch 输入按自身 tag 先 reset 后处理；旧 epoch 或已被更晚 epoch 替代的输入/结果按 tag 丢弃
     • DPDFNet DLL/模型/ABI 失败或 worker 卡住时自动回退 RNNoise，不中断音频链路
+    • 非法、超大或包含 NaN/Inf 的模型输出在进入 FIFO 前触发硬失败
     • reset 后最多容忍 4 个 10ms 预热静音块；稳态连续 3 个空输出 block 触发降级
     ↓
 [2] HPF: Biquad 80Hz 12dB/oct  ← 始终激活
@@ -99,7 +100,7 @@ voxmic.exe
 | Bass Cut | -3.0 dB | `g_eqBassCut` | slider -6–0dB |
 | Comp Enable | true | `g_compressorEnabled` | checkbox |
 
-`NR Strength` 保留在 `config.ini` 中以兼容 RNNoise；选择 DPDFNet 时设置界面会禁用该滑块。即使 DPDFNet 资源不可用，请求值仍会持久化，实际后端单独报告为 RNNoise；资源恢复后可自动重新尝试。`g_dpdfnetDegraded` 区分“资源可用但 worker 卡住”和“runtime 缺失”，并在下一次流 reset 时清除后重试。DPDFNet 在线 API 没有模型强度滑块；VoxMic 固定使用 48 kHz `dpdfnet2_48khz_hr`、CPU provider、1 个推理线程并关闭 debug。这些属于发布/开发配置，不作为普通 Settings 选项。
+`NR Strength` 保留在 `config.ini` 中以兼容 RNNoise；选择 DPDFNet 时设置界面会禁用该滑块。关闭 NR 时实际后端显示为 `off`，重新开启后再按请求值选择 RNNoise/DPDFNet。即使 DPDFNet 资源不可用，请求值仍会持久化，实际后端单独报告为 RNNoise；资源恢复后可在 fresh prepare 时重新尝试。`g_dpdfnetDegraded` 区分“资源可用但 worker 卡住”和“runtime 缺失”，并在下一次流 reset 时清除后重试。DPDFNet 在线 API 没有模型强度滑块；VoxMic 固定使用 48 kHz `dpdfnet2_48khz_hr`、CPU provider、1 个推理线程并关闭 debug。这些属于发布/开发配置，不作为普通 Settings 选项。
 
 ## Phase 3+8: 按需激活 + 事件驱动
 
@@ -120,8 +121,10 @@ main thread:         消息泵 + SetTimer(stats, 5s)
 monitor thread:      Sleep(1000) 仅保持 COM 公寓存活 (Phase 8 事件驱动)
 bridge thread:       ADB 一次性初始化 (CreateProcess NO_WINDOW) + Socket 按需连接 (idle 5s 断连, connect ~0.4ms) → g_micRequested 门控 → ring buffer push/discard
 render thread:       事件驱动 ring buffer pop → int16→float → DspPipeline → WASAPI write
-DPDFNet worker:      带 epoch tag 的 SPSC 输入队列 → sherpa-onnx Run() → 带 tag 的输出 FIFO → 固定 480 帧；reset 保留新 epoch 输入，watchdog 保护 render；渲染线程不做 DLL/模型 I/O
+DPDFNet worker:      带 epoch tag 的 SPSC 输入队列 → epoch-aware reset → sherpa-onnx Run() → 校验后的带 tag 输出 FIFO → 固定 480 帧；失败 worker 等待 stop；渲染线程不做 DLL/模型 I/O
 ```
+
+watchdog 无法取消永久不返回的原生 `Run()` 调用；该情况仍是已知退出限制。当前实现不会在释放 denoiser/DLL 前 detach worker，后续若要硬取消需要进程隔离。
 
 ## 延迟预算
 
