@@ -14,17 +14,17 @@ public:
     bool nsEnabled = false;
     bool aecEnabled = true;
     bool agcEnabled = false;
-    bool eqEnabled = true;
+    bool eqEnabled = false;
     float eqPresence = 3.0f;
     float eqBassCut = -3.0f;
-    bool compressorEnabled = true;
+    bool compressorEnabled = false;
     bool nrEnabled = true;
     float nrStrength = 0.6f;
-    std::string denoiseBackend = "rnnoise";
-    bool debugConsole = true;
+    std::string denoiseBackend = "dpdfnet";
+    bool debugConsole = false;
     bool demandMode = true;
     bool alwaysHot = false;
 
     static Config load();
-    void save() const;
+    bool save() const;
 };

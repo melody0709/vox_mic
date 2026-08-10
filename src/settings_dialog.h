@@ -5,4 +5,3 @@
 #include "config.h"
 
 HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig);
-void loadSettingsWindow(HWND hWnd, const Config* cfg);

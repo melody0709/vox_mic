@@ -32,13 +32,15 @@ Same-version artifacts are protected by input-digest sidecars (`.input.sha256`);
 ## Build & Run
 
 ```cmd
-build.bat                        # Incremental CMake build + install (requires VS2022 C++)
+build.bat                        # Incremental CMake build + install (DPDFNet by default)
 build\run\x64-release\voxmic.exe                 # Launch (tray background)
 build\run\x64-release\voxmic.exe --list-devices  # List devices
 
-build.bat --rebuild              # Clean rebuild
+build.bat --rebuild              # Clean rebuild (DPDFNet by default)
 build.bat --clean                # Clean cmake/run/artifacts/logs (keeps packages)
-build.bat --package              # Build + Portable (.7z) + MSI (RNNoise-only)
+build.bat --rnnoise-only         # Explicit single-exe build without DPDFNet assets
+build.bat --package              # Build + Portable (.7z) + MSI (DPDFNet by default)
+build.bat --rnnoise-only --package # Build + Portable (.7z) + MSI (RNNoise-only)
 build.bat --package-portable     # Build + Portable only
 build.bat --package-msi          # Build + MSI only
 build.bat --dpdfnet --package    # Build + package optional DPDFNet payload
@@ -46,12 +48,16 @@ build.bat --dpdfnet --test-dpdfnet # Build + run DPDFNet smoke tests
 build.bat --require-signing ...  # Sign release (needs VOXMIC_SIGN_* env vars)
 ```
 
-The optional DPDFNet payload is stored in `third_party/dpdfnet/` and large files
-are tracked with Git LFS. After cloning, run `git lfs pull` before
-`build.bat --dpdfnet`; the preparation script verifies and stages the vendored
-files into `build/cmake/x64-release/_deps/dpdfnet`. `build/` is disposable and
-can be cleaned without losing the dependency source. A pinned download/cache
-fallback remains only for a missing vendor directory.
+When a build or restart is requested, check for a running `voxmic.exe` first.
+If it is running, close that VoxMic process directly before building; do not
+wait for the user to exit it manually. Do not terminate unrelated processes.
+
+The DPDFNet payload is enabled by default and is stored in
+`third_party/dpdfnet/`; large files are tracked with Git LFS. After cloning,
+run `git lfs pull` before `build.bat`; the preparation script verifies and
+stages the vendored files into `build/cmake/x64-release/_deps/dpdfnet`.
+`build/` is disposable and can be cleaned without losing the dependency source.
+A pinned download/cache fallback remains only for a missing vendor directory.
 
 DPDFNet validation targets (after a DPDFNet build):
 ```cmd

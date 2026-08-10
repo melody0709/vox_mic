@@ -7,7 +7,7 @@ set "MODE=build"
 set "SIGNING=0"
 set "PACKAGE_PORTABLE=0"
 set "PACKAGE_MSI=0"
-set "ENABLE_DPDFNET=0"
+set "ENABLE_DPDFNET=1"
 set "TEST_DPDFNET=0"
 
 :parse_args
@@ -18,6 +18,7 @@ if /i "%~1"=="--package"          ( set "MODE=package" & shift & goto parse_args
 if /i "%~1"=="--package-portable" ( set "MODE=package" & set "PACKAGE_PORTABLE=1" & shift & goto parse_args)
 if /i "%~1"=="--package-msi"      ( set "MODE=package" & set "PACKAGE_MSI=1" & shift & goto parse_args)
 if /i "%~1"=="--dpdfnet"          ( set "ENABLE_DPDFNET=1" & shift & goto parse_args)
+if /i "%~1"=="--rnnoise-only"     ( set "ENABLE_DPDFNET=0" & shift & goto parse_args)
 if /i "%~1"=="--test-dpdfnet"     ( set "TEST_DPDFNET=1" & shift & goto parse_args)
 if /i "%~1"=="--require-signing"  ( set "SIGNING=1" & shift & goto parse_args)
 echo ERROR: Unknown argument "%~1"
@@ -181,10 +182,11 @@ echo Usage:
 echo   build.bat                        Incremental build + install
 echo   build.bat --rebuild              Clean rebuild
 echo   build.bat --clean                Clean cmake/run/artifacts/logs ^(keeps packages^)
-echo   build.bat --package              Build + Portable + MSI
+echo   build.bat --package              Build + Portable + MSI ^(DPDFNet by default^)
 echo   build.bat --package-portable     Build + Portable only
 echo   build.bat --package-msi          Build + MSI only
 echo   build.bat --dpdfnet              Enable DPDFNet runtime/model payload
+echo   build.bat --rnnoise-only         Build the explicit single-exe payload
 echo   build.bat --dpdfnet --test-dpdfnet  Build and run DPDFNet smoke tests
 echo   build.bat --require-signing ...  Sign release ^(needs cert env vars^)
 echo.

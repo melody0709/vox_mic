@@ -27,13 +27,13 @@ Config g_config;
 std::atomic<bool> g_running{true};
 static std::atomic<bool> g_streaming{false};
 std::atomic<float> g_gain{1.5f};
-std::atomic<bool> g_eqEnabled{true};
+std::atomic<bool> g_eqEnabled{false};
 std::atomic<float> g_eqPresence{3.0f};
 std::atomic<float> g_eqBassCut{-3.0f};
-std::atomic<bool> g_compressorEnabled{true};
+std::atomic<bool> g_compressorEnabled{false};
 std::atomic<bool> g_nrEnabled{true};
 std::atomic<float> g_nrStrength{0.6f};
-std::atomic<int> g_denoiseBackend{static_cast<int>(DenoiseBackendKind::Rnnoise)};
+std::atomic<int> g_denoiseBackend{static_cast<int>(DenoiseBackendKind::Dpdfnet)};
 std::atomic<uint64_t> g_denoiseResetEpoch{1};
 std::atomic<bool> g_dpdfnetAvailable{false};
 std::atomic<bool> g_dpdfnetDegraded{false};
@@ -79,18 +79,22 @@ static const char* bridgeStatusName(int status) {
     }
 }
 
-void syncDspAtomsFromConfig() {
-    g_gain.store(g_config.gain, std::memory_order_relaxed);
-    g_eqEnabled.store(g_config.eqEnabled, std::memory_order_relaxed);
-    g_eqPresence.store(g_config.eqPresence, std::memory_order_relaxed);
-    g_eqBassCut.store(g_config.eqBassCut, std::memory_order_relaxed);
-    g_compressorEnabled.store(g_config.compressorEnabled, std::memory_order_relaxed);
-    g_nrEnabled.store(g_config.nrEnabled, std::memory_order_relaxed);
-    g_nrStrength.store(g_config.nrStrength, std::memory_order_relaxed);
-    const int backend = (_stricmp(g_config.denoiseBackend.c_str(), "dpdfnet") == 0)
+void syncDspAtomsFromConfig(const Config& cfg) {
+    g_gain.store(cfg.gain, std::memory_order_relaxed);
+    g_eqEnabled.store(cfg.eqEnabled, std::memory_order_relaxed);
+    g_eqPresence.store(cfg.eqPresence, std::memory_order_relaxed);
+    g_eqBassCut.store(cfg.eqBassCut, std::memory_order_relaxed);
+    g_compressorEnabled.store(cfg.compressorEnabled, std::memory_order_relaxed);
+    g_nrEnabled.store(cfg.nrEnabled, std::memory_order_relaxed);
+    g_nrStrength.store(cfg.nrStrength, std::memory_order_relaxed);
+    const int backend = (_stricmp(cfg.denoiseBackend.c_str(), "dpdfnet") == 0)
         ? static_cast<int>(DenoiseBackendKind::Dpdfnet)
         : static_cast<int>(DenoiseBackendKind::Rnnoise);
     g_denoiseBackend.store(backend, std::memory_order_release);
+}
+
+void syncDspAtomsFromConfig() {
+    syncDspAtomsFromConfig(g_config);
 }
 
 void requestDenoiseReset() {

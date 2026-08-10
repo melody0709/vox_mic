@@ -32,6 +32,15 @@ static std::string readIniString(const char* path, const char* key, const char* 
     return buf;
 }
 
+static bool hasIniKey(const char* path, const char* key) {
+    char value[32] = {};
+    constexpr const char* kMissing = "__VOXMIC_MISSING__";
+    GetPrivateProfileStringA(
+        INI_SECTION, key, kMissing, value,
+        static_cast<DWORD>(sizeof(value)), path);
+    return std::strcmp(value, kMissing) != 0;
+}
+
 static int readIniInt(const char* path, const char* key, int def) {
     return (int)GetPrivateProfileIntA(INI_SECTION, key, def, path);
 }
@@ -44,20 +53,20 @@ static float readIniFloat(const char* path, const char* key, float def) {
     return (float)atof(buf);
 }
 
-static void writeIniString(const char* path, const char* key, const char* val) {
-    WritePrivateProfileStringA(INI_SECTION, key, val, path);
+static bool writeIniString(const char* path, const char* key, const char* val) {
+    return WritePrivateProfileStringA(INI_SECTION, key, val, path) != FALSE;
 }
 
-static void writeIniInt(const char* path, const char* key, int val) {
+static bool writeIniInt(const char* path, const char* key, int val) {
     char buf[32];
     snprintf(buf, sizeof(buf), "%d", val);
-    WritePrivateProfileStringA(INI_SECTION, key, buf, path);
+    return WritePrivateProfileStringA(INI_SECTION, key, buf, path) != FALSE;
 }
 
-static void writeIniFloat(const char* path, const char* key, float val) {
+static bool writeIniFloat(const char* path, const char* key, float val) {
     char buf[32];
     snprintf(buf, sizeof(buf), "%.2f", val);
-    WritePrivateProfileStringA(INI_SECTION, key, buf, path);
+    return WritePrivateProfileStringA(INI_SECTION, key, buf, path) != FALSE;
 }
 
 static std::string normalizeDenoiseBackend(const std::string& value) {
@@ -68,6 +77,11 @@ static std::string normalizeDenoiseBackend(const std::string& value) {
 Config Config::load() {
     Config cfg;
     std::string path = getIniPath();
+    const bool hasConfigFile = GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+    // Existing files written before DenoiseBackend was introduced used the old
+    // EQ/Compressor/Debug defaults. Preserve those defaults for missing keys;
+    // after the next save, all keys are materialized and this path is inert.
+    const bool legacyDefaults = hasConfigFile && !hasIniKey(path.c_str(), "DenoiseBackend");
 
     cfg.serial = readIniString(path.c_str(), "Serial", "");
     cfg.host = readIniString(path.c_str(), "Host", "127.0.0.1");
@@ -81,49 +95,56 @@ Config Config::load() {
     cfg.nsEnabled = readIniInt(path.c_str(), "NsEnabled", 0) != 0;
     cfg.aecEnabled = readIniInt(path.c_str(), "AecEnabled", 1) != 0;
     cfg.agcEnabled = readIniInt(path.c_str(), "AgcEnabled", 0) != 0;
-    cfg.eqEnabled = readIniInt(path.c_str(), "EqEnabled", 1) != 0;
+    cfg.eqEnabled = readIniInt(path.c_str(), "EqEnabled", legacyDefaults ? 1 : 0) != 0;
     cfg.eqPresence = readIniFloat(path.c_str(), "EqPresence", 3.0f);
     if (cfg.eqPresence < 0.0f) cfg.eqPresence = 0.0f;
     if (cfg.eqPresence > 8.0f) cfg.eqPresence = 8.0f;
     cfg.eqBassCut = readIniFloat(path.c_str(), "EqBassCut", -3.0f);
     if (cfg.eqBassCut < -6.0f) cfg.eqBassCut = -6.0f;
     if (cfg.eqBassCut > 0.0f) cfg.eqBassCut = 0.0f;
-    cfg.compressorEnabled = readIniInt(path.c_str(), "CompressorEnabled", 1) != 0;
+    cfg.compressorEnabled = readIniInt(
+        path.c_str(), "CompressorEnabled", legacyDefaults ? 1 : 0) != 0;
     cfg.nrEnabled = readIniInt(path.c_str(), "NrEnabled", 1) != 0;
     cfg.nrStrength = readIniFloat(path.c_str(), "NrStrength", 0.6f);
     if (cfg.nrStrength < 0.3f) cfg.nrStrength = 0.3f;
     if (cfg.nrStrength > 0.95f) cfg.nrStrength = 0.95f;
-    cfg.denoiseBackend = normalizeDenoiseBackend(
-        readIniString(path.c_str(), "DenoiseBackend", "rnnoise"));
-    cfg.debugConsole = readIniInt(path.c_str(), "DebugConsole", 1) != 0;
+    cfg.denoiseBackend = normalizeDenoiseBackend(readIniString(
+        path.c_str(), "DenoiseBackend", legacyDefaults ? "rnnoise" : "dpdfnet"));
+    cfg.debugConsole = readIniInt(
+        path.c_str(), "DebugConsole", legacyDefaults ? 1 : 0) != 0;
     cfg.demandMode = readIniInt(path.c_str(), "DemandMode", 1) != 0;
     cfg.alwaysHot = readIniInt(path.c_str(), "AlwaysHot", 0) != 0;
 
     return cfg;
 }
 
-void Config::save() const {
+bool Config::save() const {
     std::string path = getIniPath();
 
-    writeIniString(path.c_str(), "Serial", serial.c_str());
-    writeIniString(path.c_str(), "Host", host.c_str());
-    writeIniInt(path.c_str(), "Port", port);
-    writeIniString(path.c_str(), "AndroidSocket", androidSocket.c_str());
-    writeIniString(path.c_str(), "AndroidComponent", androidComponent.c_str());
-    writeIniInt(path.c_str(), "AndroidAppPreset", androidAppPreset);
-    writeIniFloat(path.c_str(), "Gain", gain);
-    writeIniInt(path.c_str(), "NsEnabled", nsEnabled ? 1 : 0);
-    writeIniInt(path.c_str(), "AecEnabled", aecEnabled ? 1 : 0);
-    writeIniInt(path.c_str(), "AgcEnabled", agcEnabled ? 1 : 0);
-    writeIniInt(path.c_str(), "EqEnabled", eqEnabled ? 1 : 0);
-    writeIniFloat(path.c_str(), "EqPresence", eqPresence);
-    writeIniFloat(path.c_str(), "EqBassCut", eqBassCut);
-    writeIniInt(path.c_str(), "CompressorEnabled", compressorEnabled ? 1 : 0);
-    writeIniInt(path.c_str(), "NrEnabled", nrEnabled ? 1 : 0);
-    writeIniFloat(path.c_str(), "NrStrength", nrStrength);
-    writeIniString(path.c_str(), "DenoiseBackend",
-        normalizeDenoiseBackend(denoiseBackend).c_str());
-    writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0);
-    writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0);
-    writeIniInt(path.c_str(), "AlwaysHot", alwaysHot ? 1 : 0);
+    // WritePrivateProfileStringA updates individual keys; this sequence is not
+    // atomic. A failure can leave config.ini partially updated, so callers must
+    // retain the previous configuration and attempt an explicit rollback.
+    bool ok = true;
+    ok = writeIniString(path.c_str(), "Serial", serial.c_str()) && ok;
+    ok = writeIniString(path.c_str(), "Host", host.c_str()) && ok;
+    ok = writeIniInt(path.c_str(), "Port", port) && ok;
+    ok = writeIniString(path.c_str(), "AndroidSocket", androidSocket.c_str()) && ok;
+    ok = writeIniString(path.c_str(), "AndroidComponent", androidComponent.c_str()) && ok;
+    ok = writeIniInt(path.c_str(), "AndroidAppPreset", androidAppPreset) && ok;
+    ok = writeIniFloat(path.c_str(), "Gain", gain) && ok;
+    ok = writeIniInt(path.c_str(), "NsEnabled", nsEnabled ? 1 : 0) && ok;
+    ok = writeIniInt(path.c_str(), "AecEnabled", aecEnabled ? 1 : 0) && ok;
+    ok = writeIniInt(path.c_str(), "AgcEnabled", agcEnabled ? 1 : 0) && ok;
+    ok = writeIniInt(path.c_str(), "EqEnabled", eqEnabled ? 1 : 0) && ok;
+    ok = writeIniFloat(path.c_str(), "EqPresence", eqPresence) && ok;
+    ok = writeIniFloat(path.c_str(), "EqBassCut", eqBassCut) && ok;
+    ok = writeIniInt(path.c_str(), "CompressorEnabled", compressorEnabled ? 1 : 0) && ok;
+    ok = writeIniInt(path.c_str(), "NrEnabled", nrEnabled ? 1 : 0) && ok;
+    ok = writeIniFloat(path.c_str(), "NrStrength", nrStrength) && ok;
+    ok = writeIniString(path.c_str(), "DenoiseBackend",
+        normalizeDenoiseBackend(denoiseBackend).c_str()) && ok;
+    ok = writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0) && ok;
+    ok = writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0) && ok;
+    ok = writeIniInt(path.c_str(), "AlwaysHot", alwaysHot ? 1 : 0) && ok;
+    return ok;
 }
