@@ -18,7 +18,7 @@
 |---|------|---------|------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | 同步 `APP_VERSION` 字符串 |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=11) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=12) |
 
 `src/tray_icon.cpp` 已通过 `#include "version.h"` 自动同步，无需手动修改。
 
@@ -91,7 +91,8 @@ src/
 ├── tray_icon.h/cpp              # 系统托盘 + 右键菜单
 ├── config.h/cpp                 # config.ini 持久化 (20 字段)
 ├── settings_dialog.h/cpp        # 非模态设置窗口
-├── mic_usage_monitor.h/cpp      # 事件驱动 COM + IAudioMeterInformation 静音兜底
+├── mic_usage_monitor.h/cpp      # 逐会话 COM 事件 + 校准/防抖/fail-open 策略
+├── mic_session_state.h          # 带身份的幂等会话状态跟踪器
 └── dsp/
     ├── pipeline.h               # DSP 链 (RNNoise/DPDFNet→HPF→EQ→Comp→Limiter)
     ├── dpdfnet_processor.h/cpp  # 可选 DPDFNet worker/FIFO 适配器
@@ -105,7 +106,7 @@ src/
 
 ```
 main:      消息泵 + SetTimer(stats)
-monitor:   idle Sleep(1000) / active 每1s GetPeakValue()
+monitor:   独占 MTA COM + 逐会话回调 + 200ms 状态校准
 bridge:    ADB 管理 + Socket recv → g_micRequested 门控 → ring buffer
 render:    ring buffer pop → int16→float → DspPipeline → WASAPI write
 ```
@@ -126,10 +127,11 @@ render:    ring buffer pop → int16→float → DspPipeline → WASAPI write
 
 | 机制 | 触发 | 延迟 | 开销 |
 |------|------|------|------|
-| OnStateChanged (事件) | COM 回调 | 即时 | 零 |
-| renderStallScore | render event 3×超时 | ~6s | 零 (已有) |
-| IAudioMeterInformation | monitor 线程 (仅活跃态) | ~3s | 1 COM/秒 |
-| **idle 态** | Sleep(1000) 循环 | — | **零 CPU / 零 COM** |
+| 逐会话 `OnStateChanged` | COM 回调 | 即时 | 事件驱动 |
+| 会话状态校准 | 枚举 + `GetState()` | 漏事件最多 200ms 修复 | 每秒 5 次 |
+| 最后会话退出 | 无活跃会话 | 400ms 防抖 | 校准循环计时 |
+| renderStallScore | render event 3×超时 | ~6s | 既有 render 保护 |
+| Monitor 初始化失败 | COM/设备/session manager 失败 | 立即 fail-open | 重启前连续传音 |
 
 | 阈值 | 值 |
 |------|-----|
@@ -163,6 +165,6 @@ DSP: 可选 RNNoise/DPDFNet 降噪 → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass
 
 ### Monitor 三层检测
 
-1. **COM 事件回调** (`IAudioSessionNotification` + `IAudioSessionEvents`): 靶向 CABLE Output 采集端点 (`EnumAudioEndpoints(eCapture)` 按名匹配，找不到 fallback 默认)
-2. **Render event 超时** (`wasapi_output.cpp`): 连续3次 `WaitForSingleObject` 超时 → `renderStallScore=3`，bridge 用 `effectiveActive = demandOff || (micRequested && !renderStalled)` 门控
-3. **IAudioMeterInformation** (`mic_usage_monitor.cpp`): 活跃时每1s `GetPeakValue()`，连续3s峰值<阈值 → 强制 `g_micRequested=false`；idle 时不调用
+1. **逐会话 COM 事件** (`IAudioSessionNotification` + 每个采集会话一个 `IAudioSessionEvents` observer)：靶向 CABLE Output 采集端点（`EnumAudioEndpoints(eCapture)` 按名匹配，找不到时 fallback 默认端点）；回调路径只发布原子状态并唤醒 monitor 线程。
+2. **200ms 状态校准** (`mic_usage_monitor.cpp`)：重新枚举会话并调用 `GetState()`，修复遗漏或乱序回调；最后一个会话 inactive 后有 400ms 退出防抖。信号音量不再用于判断会话活动。
+3. **Render event 超时** (`wasapi_output.cpp`)：连续 3 次 `WaitForSingleObject` 超时 → `renderStallScore=3`，bridge 用 `effectiveActive = demandOff || (micRequested && !renderStalled)` 门控。Monitor 初始化失败时 fail-open，避免永久静音。

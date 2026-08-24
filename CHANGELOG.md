@@ -2,6 +2,22 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
+## v0.6.7 (2026-08-24)
+
+### Demand Mode session tracking reliability
+
+| Fix | Description |
+|-----|-------------|
+| **Per-session state** | Replaced the shared, identity-free active counter with one `IAudioSessionEvents` observer per capture session and idempotent state tracking. Rapid stop/start can no longer double-count or lose the next activation. |
+| **Callback reconciliation** | Added a 200 ms session enumeration/state reconciliation path. A missed or reordered Core Audio callback is corrected before it can mute an entire recording. |
+| **Silence semantics** | Removed the endpoint-peak rule that treated three seconds of valid user silence as “microphone unused.” Demand state now follows capture-session activity only. |
+| **COM ownership** | Core Audio initialization, reconciliation, and shutdown now run on the same monitor thread. Session controls are retained and released explicitly. |
+| **Safe fallback** | If session monitoring cannot initialize, the bridge fails open to continuous audio instead of emitting permanent digital silence. |
+| **Diagnostics/tests** | Stats now distinguish source receive/discard/push counts and session reconciliation corrections. Added a pure state regression test, a real WASAPI rapid-toggle probe, and Android PCM RMS/peak/zero-ratio logging. |
+| **Release identity** | Bumped desktop/Android to `0.6.7` / Android `versionCode=13`. |
+
+---
+
 ## v0.6.6 (2026-08-10)
 
 ### Settings first-open repaint

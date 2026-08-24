@@ -13,8 +13,8 @@ android {
         minSdkVersion 14
         targetSdkVersion 34
         compileSdk 34
-        versionCode 12
-        versionName '0.6.6'
+        versionCode 13
+        versionName '0.6.7'
         vectorDrawables { useSupportLibrary true }
     }
     signingConfigs {

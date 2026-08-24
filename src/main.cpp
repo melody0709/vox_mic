@@ -42,12 +42,20 @@ std::atomic<bool> g_micRequested{false};
 static std::atomic<bool> g_micStreaming{false};
 std::atomic<bool> g_demandMode{true};
 std::atomic<bool> g_alwaysHot{true};
-static std::atomic<uint64_t> g_micOnTick{0};
+std::atomic<uint64_t> g_micOnTick{0};
+static std::atomic<uint64_t> g_sourceBlocksReceived{0};
+static std::atomic<uint64_t> g_sourceBlocksDiscarded{0};
+static std::atomic<uint64_t> g_sourceBlocksPushed{0};
 static MicUsageMonitor g_micMonitor;
 static std::thread g_monitorThread;
 static WASAPIOutput* g_wasapiOutput{nullptr};
 TrayIcon* g_trayIcon{nullptr};
 static HINSTANCE g_hInstance{nullptr};
+
+void setDemandModeRuntime(bool enabled) {
+    g_demandMode.store(enabled, std::memory_order_release);
+    g_micMonitor.onDemandModeChanged();
+}
 
 enum class BridgeRecoveryState {
     Healthy,
@@ -125,8 +133,18 @@ VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     } else if (effectiveBackend == static_cast<int>(DenoiseBackendKind::Off)) {
         denoiseName = "off";
     }
-    printf("[Stats] state=%s recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu proc=%.0fus lat=%.1fms denoise=%s dpdf(avail=%d degraded=%d uf=%llu inDrop=%llu outDrop=%llu worker=%.0fus)\n",
+    printf("[Stats] state=%s request=%d sessions=%d/%d corrections=%llu source(recv=%llu idleDrop=%llu push=%llu) render(recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu) proc=%.0fus lat=%.1fms denoise=%s dpdf(avail=%d degraded=%d uf=%llu inDrop=%llu outDrop=%llu worker=%.0fus)\n",
         bridgeStatusName(g_bridgeStatus.load(std::memory_order_relaxed)),
+        g_micRequested.load(std::memory_order_relaxed) ? 1 : 0,
+        g_micMonitor.activeSessionCount(),
+        g_micMonitor.trackedSessionCount(),
+        static_cast<unsigned long long>(g_micMonitor.reconciliationCorrections()),
+        static_cast<unsigned long long>(
+            g_sourceBlocksReceived.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(
+            g_sourceBlocksDiscarded.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(
+            g_sourceBlocksPushed.load(std::memory_order_relaxed)),
         g_wasapiOutput->receivedBlocks.load(),
         g_wasapiOutput->droppedBlocks.load(),
         g_wasapiOutput->underruns.load(),
@@ -145,34 +163,25 @@ VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
 }
 
 void micMonitorThread() {
-    int silenceCount = 0;
-    while (g_running.load(std::memory_order_relaxed)) {
-        if (!g_demandMode.load(std::memory_order_relaxed)) {
-            g_micRequested.store(true, std::memory_order_relaxed);
-            silenceCount = 0;
-            Sleep(500);
-            continue;
-        }
-
-        if (!g_micRequested.load(std::memory_order_relaxed)) {
-            silenceCount = 0;
-            Sleep(1000);
-            continue;
-        }
-
-        float peak = g_micMonitor.getCapturePeak();
-        if (peak > 0.0001f) {
-            silenceCount = 0;
-        } else {
-            silenceCount++;
-            if (silenceCount >= 3) {
-                g_micRequested.store(false, std::memory_order_relaxed);
-                silenceCount = 0;
-            }
-        }
-
-        Sleep(1000);
+    if (!g_micMonitor.init()) {
+        // Fail open: a monitor failure must not turn the microphone into
+        // permanent digital silence. Demand Mode temporarily behaves as an
+        // always-stream gate until the application is restarted.
+        g_micRequested.store(true, std::memory_order_release);
+        g_micOnTick.store(GetTickCount64(), std::memory_order_release);
+        printf("MicUsageMonitor: unavailable, failing open to continuous audio\n");
+        fflush(stdout);
+        while (g_running.load(std::memory_order_relaxed)) Sleep(200);
+        return;
     }
+
+    while (g_running.load(std::memory_order_relaxed)) {
+        // Events provide the fast path. Reconciliation repairs a missed or
+        // reordered Core Audio callback within one interval.
+        g_micMonitor.reconcile();
+        g_micMonitor.waitForChange(200);
+    }
+    g_micMonitor.shutdown();
 }
 
 void audioBridgeThread() {
@@ -413,6 +422,7 @@ void audioBridgeThread() {
                 if (g_trayIcon) g_trayIcon->updateIcon(false, false);
                 break;
             }
+            g_sourceBlocksReceived.fetch_add(1, std::memory_order_relaxed);
 
             bool micRequested = g_micRequested.load(std::memory_order_relaxed);
             bool demandOff = !g_demandMode.load(std::memory_order_relaxed);
@@ -420,6 +430,7 @@ void audioBridgeThread() {
             bool effectiveActive = demandOff || (micRequested && !renderStalled);
 
             if (!effectiveActive) {
+                g_sourceBlocksDiscarded.fetch_add(1, std::memory_order_relaxed);
                 if (!wasIdle) requestDenoiseReset();
                 g_micStreaming.store(false);
                 g_bridgeStatus.store(BRIDGE_IDLE_HOT, std::memory_order_relaxed);
@@ -448,7 +459,7 @@ void audioBridgeThread() {
 
             if (wasIdle) {
                 requestDenoiseReset();
-                uint64_t t = g_micOnTick.load(std::memory_order_relaxed);
+                uint64_t t = g_micOnTick.exchange(0, std::memory_order_acq_rel);
                 if (t) {
                     uint64_t now = GetTickCount64();
                     printf("[DetectLatency] %llums\n", (unsigned long long)(now - t));
@@ -469,6 +480,8 @@ void audioBridgeThread() {
 
             if (!g_wasapiOutput->getRingBuffer()->push(buffer, BLOCK_SIZE)) {
                 g_wasapiOutput->droppedBlocks.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                g_sourceBlocksPushed.fetch_add(1, std::memory_order_relaxed);
             }
             g_wasapiOutput->receivedBlocks.fetch_add(1, std::memory_order_relaxed);
         }
@@ -608,9 +621,7 @@ int main(int argc, char* argv[]) {
 
     std::thread bridge(audioBridgeThread);
 
-    if (g_micMonitor.init()) {
-        g_monitorThread = std::thread(micMonitorThread);
-    }
+    g_monitorThread = std::thread(micMonitorThread);
 
     wasapiOutput.start();
 
@@ -626,7 +637,6 @@ int main(int argc, char* argv[]) {
     g_running.store(false);
     if (bridge.joinable()) bridge.join();
     if (g_monitorThread.joinable()) g_monitorThread.join();
-    g_micMonitor.shutdown();
     wasapiOutput.stop();
 
     KillTimer(hWnd, 1);

@@ -13,6 +13,12 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
                                     [DSP] RNNoise/DPDFNet → HPF → EQ → Comp → Limiter
 ```
 
+## v0.6.7 Demand Mode 可靠性
+
+Demand Mode 现在为每个 Windows 采集会话建立独立 observer。Core Audio 事件负责即时激活，200ms 周期校准负责修复遗漏或乱序回调；最后一个会话停止后保留 400ms 退出防抖，快速停止/重新开始不会把下一次录音丢弃。信号音量不再用于判断会话是否活跃，因此用户保持安静也不会错误关闭音频链路。
+
+周期 Stats 会报告 active/tracked session、校准修正次数、源音频 received/discarded/pushed 以及 render underrun。安装更新后的 Android app 后，手机端还会每秒输出 PCM RMS、peak 和精确零样本比例。
+
 ## v0.6.5 DPDFNet worker 加固
 
 DPDFNet worker 硬失败后现在会正确清除 ready 状态、停止空转，并在销毁处理器时快速退出。epoch 交接改为依据输入 block 自带的 epoch 标签：新 epoch 首块会先 reset 后处理，不再被旧 `workerEpoch` 误丢弃；已经被更新 epoch 替代的输入和推理结果仍会被过滤。模型返回非法长度、超大输出或 NaN/Inf 时会触发硬失败并回退 RNNoise。诊断和设置页也会把降噪关闭状态显示为 `off`，不再误报 RNNoise/DPDFNet 正在运行。
@@ -75,16 +81,16 @@ build\run\x64-release\voxmic.exe
 ### Windows
 
 ```cmd
-build.bat
-
 git lfs pull
-build.bat --dpdfnet
-build.bat --dpdfnet --test-dpdfnet
+build.bat
+build.bat --test-dpdfnet
+build.bat --rnnoise-only
+build.bat --package
 ```
 
 需要 Visual Studio 2022 (C++ 桌面开发)。
 
-`build.bat` 生成 RNNoise-only 开发载荷。可选 DPDFNet 载荷保存在 `third_party/dpdfnet/`，并使用 Git LFS 管理；clone 后先执行一次 `git lfs pull`，将模型和 DLL 实体化。`build.bat --dpdfnet` 会校验仓库内文件，并把它们暂存到 `build/cmake/x64-release/_deps/dpdfnet` 后再配置 CMake，因此清空 `build/` 后也可以离线重新生成。仅当仓库依赖目录不可用时，准备脚本才保留经过 SHA-256 校验的下载/缓存回退路径。打包可选后端使用 `build.bat --dpdfnet --package`。
+`build.bat` 默认生成启用 DPDFNet 的完整开发载荷。模型/runtime 载荷保存在 `third_party/dpdfnet/`，并使用 Git LFS 管理；clone 后先执行一次 `git lfs pull`，将模型和 DLL 实体化。构建会校验仓库内文件，并把它们暂存到 `build/cmake/x64-release/_deps/dpdfnet` 后再配置 CMake，因此清空 `build/` 后也可以离线重新生成。使用 `build.bat --rnnoise-only` 可生成明确的单 EXE 载荷，使用 `build.bat --package` 可生成默认的 Portable 与 MSI。仅当仓库依赖目录不可用时，准备脚本才保留经过 SHA-256 校验的下载/缓存回退路径。
 
 仓库内载荷包括 sherpa-onnx C API 头文件、三个 Windows x64 runtime DLL 和 `dpdfnet2_48khz_hr.onnx`；对应 SHA-256 记录在 `third_party/dpdfnet/metadata.json`。第三方许可证说明位于 `third_party/DPDFNET_THIRD_PARTY_NOTICES.txt`。
 
@@ -93,12 +99,12 @@ build.bat --dpdfnet --test-dpdfnet
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.5.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.7.apk"
 ```
 
 ## 性能
 
-| 指标 | v0.6.5 |
+| 指标 | v0.6.7 |
 |------|--------|
 | CPU 空闲 | **0-0.1%** |
 | CPU 激活 | ~0.1% (DSP) |

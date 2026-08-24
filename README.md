@@ -13,6 +13,12 @@ Android Phone Mic -> [VoxMic Source App] -> ADB -> This Program -> VB-CABLE -> W
                                     [DSP] RNNoise/DPDFNet -> HPF -> EQ -> Comp -> Limiter
 ```
 
+## v0.6.7 Demand Mode reliability
+
+Demand Mode uses one observer per Windows capture session. Core Audio events provide immediate activation, while a 200 ms reconciliation pass repairs missed or reordered callbacks. Deactivation has a 400 ms grace period so rapid stop/start sequences do not discard the next recording. Signal amplitude is never used as an activity decision: a silent user is still an active capture session.
+
+Periodic Stats report active/tracked sessions, reconciliation corrections, source blocks received/discarded/pushed, and render underruns. The Android source also reports PCM RMS, peak, and exact-zero ratio once per second when the updated app is installed.
+
 ## v0.6.5 DPDFNet worker hardening
 
 The DPDFNet worker now converges cleanly after a hard failure: it clears its ready state, stops polling, and exits quickly when the processor is destroyed. Epoch hand-off now uses the input block's epoch tag so a new-epoch first block is reset and processed instead of being discarded; superseded epochs and stale inference results remain filtered. Invalid, oversized, or non-finite model output causes a hard fallback to RNNoise. Diagnostics and Settings distinguish disabled noise reduction (`off`) from RNNoise and DPDFNet.
@@ -75,16 +81,16 @@ build\run\x64-release\voxmic.exe
 ### Windows
 
 ```cmd
-build.bat
-
 git lfs pull
-build.bat --dpdfnet
-build.bat --dpdfnet --test-dpdfnet
+build.bat
+build.bat --test-dpdfnet
+build.bat --rnnoise-only
+build.bat --package
 ```
 
 Requires Visual Studio 2022 (C++ Desktop Development).
 
-`build.bat` produces the RNNoise-only development payload. The optional payload is vendored in `third_party/dpdfnet/` and managed with Git LFS; after cloning, run `git lfs pull` once so the model and DLLs are materialized. `build.bat --dpdfnet` verifies those files and stages them into `build/cmake/x64-release/_deps/dpdfnet` before configuring CMake, so a clean `build/` can be rebuilt without network access. The preparation script retains a verified download/cache fallback only when the vendored directory is unavailable. To package the optional payload, use `build.bat --dpdfnet --package`.
+`build.bat` produces the full DPDFNet-enabled development payload by default. The model/runtime payload is vendored in `third_party/dpdfnet/` and managed with Git LFS; after cloning, run `git lfs pull` once so the model and DLLs are materialized. The build verifies those files and stages them into `build/cmake/x64-release/_deps/dpdfnet` before configuring CMake, so a clean `build/` can be rebuilt without network access. Use `build.bat --rnnoise-only` for the explicit single-executable payload, or `build.bat --package` for the default Portable and MSI packages. The preparation script retains a verified download/cache fallback only when the vendored directory is unavailable.
 
 The vendored payload contains the sherpa-onnx C API header, three Windows x64 runtime DLLs, and `dpdfnet2_48khz_hr.onnx`; its SHA-256 values are recorded in `third_party/dpdfnet/metadata.json`. Third-party license notices are in `third_party/DPDFNET_THIRD_PARTY_NOTICES.txt`.
 
@@ -93,12 +99,12 @@ The vendored payload contains the sherpa-onnx C API header, three Windows x64 ru
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.5.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.7.apk"
 ```
 
 ## Performance
 
-| Metric | v0.6.5 |
+| Metric | v0.6.7 |
 |--------|--------|
 | CPU Idle | **0-0.1%** |
 | CPU Active | ~0.1% (DSP) |

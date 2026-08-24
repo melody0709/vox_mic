@@ -114,6 +114,18 @@ target_link_libraries(voxmic PRIVATE
 include(cmake/VoxMicRuntime.cmake)
 voxmic_install_runtime(voxmic)
 
+enable_testing()
+add_executable(mic_session_state_test tests/mic_session_state_test.cpp)
+target_include_directories(mic_session_state_test PRIVATE src)
+target_compile_options(mic_session_state_test PRIVATE
+    /O2 /EHsc /W4 /WX- /utf-8)
+add_test(NAME mic_session_state_test COMMAND mic_session_state_test)
+
+add_executable(mic_usage_toggle_probe tests/mic_usage_toggle_probe.cpp)
+target_compile_options(mic_usage_toggle_probe PRIVATE
+    /O2 /EHsc /W4 /WX- /utf-8)
+target_link_libraries(mic_usage_toggle_probe PRIVATE ole32 mmdevapi)
+
 if(VOXMIC_ENABLE_DPDFNET)
     add_executable(dpdfnet_smoke
         tests/dpdfnet_smoke.cpp

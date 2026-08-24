@@ -22,6 +22,7 @@ extern std::atomic<int> g_denoiseEffectiveBackend;
 extern TrayIcon* g_trayIcon;
 extern void syncDspAtomsFromConfig(const Config& cfg);
 extern void requestDenoiseReset();
+extern void setDemandModeRuntime(bool enabled);
 
 #define SETTINGS_CLASS "VoxMicSettingsClass"
 #define IDC_COMBO_DEVICE      2001
@@ -755,7 +756,7 @@ static bool saveStartupRegistrationControl(HWND hWnd) {
 
 static void rollbackRuntimeConfigToggle(HWND hWnd, const Config& previous) {
     g_config = previous;
-    g_demandMode.store(previous.demandMode, std::memory_order_relaxed);
+    setDemandModeRuntime(previous.demandMode);
     g_alwaysHot.store(previous.alwaysHot, std::memory_order_relaxed);
     if (g_trayIcon) {
         g_trayIcon->setDemandMode(previous.demandMode);
@@ -1341,7 +1342,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         case ID_MENU_DEMAND_MODE: {
             const Config previous = g_config;
             bool newVal = !g_demandMode.load();
-            g_demandMode.store(newVal);
+            setDemandModeRuntime(newVal);
             if (g_trayIcon) g_trayIcon->setDemandMode(newVal);
             g_config.demandMode = newVal;
             if (!g_config.save()) {

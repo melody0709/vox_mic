@@ -12,7 +12,7 @@ VoxMic Source App (DEFAULT source + optional NS/AEC/AGC)
 ADB Forward (tcp:27183)
     | TCP (960 bytes/block = 480 frames)
 voxmic.exe
-    +-- MicUsageMonitor Thread (Event-driven: IAudioSessionNotification + IAudioSessionEvents)
+    +-- MicUsageMonitor Thread (per-session events + 200ms reconciliation)
     |       +-> g_micRequested (atomic<bool>)
     |
     +-- Socket Receive Thread (On-demand connection: idle 5s disconnect, connect ~0.4ms measured)
@@ -52,7 +52,8 @@ voxmic.exe
 | `tray_icon.h/cpp` | System tray + context menu (includes gray version number) |
 | `config.h/cpp` | config.ini persistence (**20 fields**) |
 | `settings_dialog.h/cpp` | **Main window** GUI (device/network/app/audio/DSP/Debug, modeless persistent window) |
-| **`mic_usage_monitor.h/cpp`** | Phase 3+8: Event-driven (IAudioSessionNotification + IAudioSessionEvents) |
+| **`mic_usage_monitor.h/cpp`** | Per-session `IAudioSessionEvents`, periodic reconciliation, Demand Mode debounce/fail-open policy |
+| **`mic_session_state.h`** | Identity-aware, idempotent capture-session activity tracker used by the monitor and regression test |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
 | **`dsp/pipeline.h`** | DSP chain scheduling (RNNoise/DPDFNet->HPF->EQ->Comp->Limiter) |
 | **`dsp/dpdfnet_processor.h/cpp`** | Optional pinned-header sherpa-onnx C ABI loader, worker thread, epoch reset/watchdog, and 480-sample FIFO adapter |
@@ -109,9 +110,10 @@ voxmic.exe
 
 | Parameter | Value | Atomic Variable | Thread |
 |-----------|-------|-----------------|--------|
-| Monitor detection | Event-driven (COM callback) | `g_micRequested` | monitor |
+| Monitor detection | Per-session COM events + 200ms reconciliation | `g_micRequested` | monitor |
 | Streaming gate | discard when `!g_micRequested` | `g_micStreaming` | bridge -> tray |
-| Detection latency | Instant (COM callback) | `g_micOnTick` | monitor -> bridge |
+| Detection latency | Immediate event; <=200ms missed-event repair | `g_micOnTick` | monitor -> bridge |
+| Deactivation grace | 400ms after the final session becomes inactive | `g_micRequested` | monitor |
 | Demand Mode toggle | Tray context menu, persisted to registry | `g_demandMode` | tray -> monitor |
 | Idle ring buffer reset | 5s (50 x 100ms) | -- | bridge |
 | Socket idle disconnect | 5s (500 blocks) Always Hot OFF | `g_alwaysHot` | bridge |
@@ -121,7 +123,7 @@ voxmic.exe
 
 ```
 main thread:         Message pump + SetTimer(stats, 5s)
-monitor thread:      Sleep(1000) only keeps COM apartment alive (Phase 8 event-driven)
+monitor thread:      Owns the MTA COM apartment; per-session callbacks + 200ms enumerate/GetState reconciliation
 bridge thread:       ADB one-time init (CreateProcess NO_WINDOW) + Socket on-demand connection (idle 5s disconnect, connect ~0.4ms) -> g_micRequested gate -> ring buffer push/discard
 render thread:       Event-driven ring buffer pop -> int16->float -> DspPipeline -> WASAPI write
 DPDFNet worker:      tagged SPSC input queue -> epoch-aware reset -> sherpa-onnx Run() -> validated tagged output FIFO -> fixed 480-sample blocks; failed worker blocks until stop; no DLL/model I/O on render
