@@ -774,6 +774,10 @@ static void rollbackRuntimeConfigToggle(HWND hWnd, const Config& previous) {
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
 
+    if (g_trayIcon && g_trayIcon->handleWindowMessage(msg)) {
+        return 0;
+    }
+
     switch (msg) {
     case WM_CREATE: {
         CREATESTRUCTA* pCreate = (CREATESTRUCTA*)lParam;

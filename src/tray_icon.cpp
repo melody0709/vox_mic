@@ -11,8 +11,14 @@ TrayIcon::~TrayIcon() {
     destroy();
 }
 
+bool TrayIcon::addIcon() {
+    m_isCreated = Shell_NotifyIconA(NIM_ADD, &m_nid) != FALSE;
+    return m_isCreated;
+}
+
 bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     m_hWnd = hWnd;
+    m_taskbarCreatedMessage = RegisterWindowMessageA("TaskbarCreated");
 
     m_nid.cbSize = sizeof(NOTIFYICONDATAA);
     m_nid.hWnd = hWnd;
@@ -31,8 +37,7 @@ bool TrayIcon::create(HINSTANCE hInstance, HWND hWnd) {
     AppendMenuA(m_hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuA(m_hMenu, MF_STRING, ID_MENU_EXIT, "Exit");
 
-    m_isCreated = Shell_NotifyIconA(NIM_ADD, &m_nid);
-    return m_isCreated;
+    return addIcon();
 }
 
 void TrayIcon::destroy() {
@@ -44,6 +49,20 @@ void TrayIcon::destroy() {
         DestroyMenu(m_hMenu);
         m_hMenu = nullptr;
     }
+}
+
+bool TrayIcon::handleWindowMessage(UINT message) {
+    if (m_taskbarCreatedMessage == 0 || message != m_taskbarCreatedMessage) {
+        return false;
+    }
+
+    // Explorer owns notification-area icons. When it restarts, its copy of
+    // the icon disappears even though this process still considers it added.
+    // Re-add the existing NOTIFYICONDATA so the current visual state and
+    // tooltip are restored without rebuilding the tray menu.
+    m_isCreated = false;
+    addIcon();
+    return true;
 }
 
 void TrayIcon::updateIcon(bool isStreaming, bool isConnected) {

@@ -21,6 +21,7 @@ public:
 
     bool create(HINSTANCE hInstance, HWND hWnd);
     void destroy();
+    bool handleWindowMessage(UINT message);
     void updateIcon(bool isStreaming, bool isConnected);
     void showMenu(HWND hWnd);
     void showTooltip(const char* text);
@@ -33,5 +34,8 @@ private:
     NOTIFYICONDATAA m_nid{};
     HWND m_hWnd{nullptr};
     HMENU m_hMenu{nullptr};
+    UINT m_taskbarCreatedMessage{0};
     bool m_isCreated{false};
+
+    bool addIcon();
 };
