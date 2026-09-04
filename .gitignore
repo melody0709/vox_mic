@@ -27,6 +27,9 @@ keystore.properties
 *.user
 *.suo
 
+# Agent workspace (session logs/memory, not part of the source tree)
+.workbuddy/
+
 # Python (original reference project, not part of this repo)
 __pycache__/
 *.pyc
