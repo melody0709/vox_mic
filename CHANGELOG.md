@@ -2,7 +2,7 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
-## v0.6.7 (2026-08-24)
+## v0.6.7 (2026-09-04)
 
 ### Demand Mode session tracking reliability
 
@@ -15,6 +15,13 @@
 | **Safe fallback** | If session monitoring cannot initialize, the bridge fails open to continuous audio instead of emitting permanent digital silence. |
 | **Diagnostics/tests** | Stats now distinguish source receive/discard/push counts and session reconciliation corrections. Added a pure state regression test, a real WASAPI rapid-toggle probe, and Android PCM RMS/peak/zero-ratio logging. |
 | **Release identity** | Bumped desktop/Android to `0.6.7` / Android `versionCode=13`. |
+
+### Tray icon recovery
+
+| Fix | Description |
+|-----|-------------|
+| **Explorer restart** | Registers the `TaskbarCreated` window message and re-adds the existing `NOTIFYICONDATA` when Windows Explorer restarts, so the tray icon no longer disappears while the application keeps running. |
+| **Shared add path** | Extracted the `NIM_ADD` call into `TrayIcon::addIcon()` so initial creation and re-registration cannot drift apart; the settings window routes messages to the tray icon before its own handling. |
 
 ---
 
