@@ -18,7 +18,7 @@ Version is unified in `src/version.h` (`APP_VERSION` macro). On each bump, modif
 |---|------|--------------|--------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | Sync `APP_VERSION` string |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (last=12) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (last=14) |
 
 `src/tray_icon.cpp` auto-syncs via `#include "version.h"`, no manual change needed.
 
@@ -193,7 +193,7 @@ render:    ring buffer pop -> int16->float -> DspPipeline -> WASAPI write
 | Mechanism | Trigger | Latency | Overhead |
 |-----------|---------|---------|----------|
 | Per-session `OnStateChanged` | COM callback | Immediate | Event-driven |
-| Session reconciliation | enumerate + `GetState()` | <=200ms missed-event repair | 5 passes/sec |
+| Session reconciliation | tracked-session `GetState()` | <=200ms missed-state-event repair | 5 passes/sec |
 | Final-session deactivation | no active sessions | 400ms grace | Timer check in reconciliation |
 | renderStallScore | render event 3x timeout | ~6s | Existing render guard |
 | Monitor initialization failure | COM/device/session-manager failure | Immediate fail-open | Continuous audio until restart |
@@ -230,6 +230,6 @@ Configuration 20 fields, config.ini persistence. `syncDspAtomsFromConfig()` in `
 
 ### Monitor Three-layer Detection
 
-1. **Per-session COM events** (`IAudioSessionNotification` + one `IAudioSessionEvents` observer per capture session): Targets CABLE Output capture endpoint (`EnumAudioEndpoints(eCapture)` name match, fallback to default if not found); callback paths only publish atomic state and wake the monitor thread.
-2. **200 ms reconciliation** (`mic_usage_monitor.cpp`): Re-enumerates sessions and calls `GetState()` to repair missed/reordered callbacks; the final inactive transition uses a 400 ms grace period. Signal amplitude is never used as session activity.
+1. **Per-session COM events** (`IAudioSessionNotification` + one `IAudioSessionEvents` observer per capture session): Targets CABLE Output capture endpoint (`EnumAudioEndpoints(eCapture)` name match, fallback to default if not found). Existing sessions are enumerated once at initialization; `OnSessionCreated` retains and queues later sessions for the monitor thread. State callbacks publish atomic state and wake the monitor thread.
+2. **200 ms reconciliation** (`mic_usage_monitor.cpp`): Calls `GetState()` only on already tracked sessions to repair missed/reordered state callbacks; it never repeatedly creates session enumerators. The final inactive transition uses a 400 ms grace period. Signal amplitude is never used as session activity.
 3. **Render event timeout** (`wasapi_output.cpp`): 3 consecutive `WaitForSingleObject` timeouts -> `renderStallScore=3`, bridge uses `effectiveActive = demandOff || (micRequested && !renderStalled)` gate. Monitor initialization failure is fail-open so it cannot permanently mute the source.

@@ -13,9 +13,9 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
                                     [DSP] RNNoise/DPDFNet → HPF → EQ → Comp → Limiter
 ```
 
-## v0.6.7 Demand Mode 可靠性
+## v0.6.8 Demand Mode 内存稳定性
 
-Demand Mode 现在为每个 Windows 采集会话建立独立 observer。Core Audio 事件负责即时激活，200ms 周期校准负责修复遗漏或乱序回调；最后一个会话停止后保留 400ms 退出防抖，快速停止/重新开始不会把下一次录音丢弃。信号音量不再用于判断会话是否活跃，因此用户保持安静也不会错误关闭音频链路。
+Demand Mode 现在为每个 Windows 采集会话建立独立 observer。已有会话仅在初始化时枚举一次，后续会话通过 Core Audio 通知加入；200ms 周期校准只刷新已跟踪状态，以修复遗漏或乱序的状态回调。最后一个会话停止后保留 400ms 退出防抖，快速停止/重新开始不会把下一次录音丢弃。信号音量不再用于判断会话是否活跃，因此用户保持安静也不会错误关闭音频链路。
 
 周期 Stats 会报告 active/tracked session、校准修正次数、源音频 received/discarded/pushed 以及 render underrun。安装更新后的 Android app 后，手机端还会每秒输出 PCM RMS、peak 和精确零样本比例。
 
@@ -99,12 +99,12 @@ build.bat --package
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.7.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.8.apk"
 ```
 
 ## 性能
 
-| 指标 | v0.6.7 |
+| 指标 | v0.6.8 |
 |------|--------|
 | CPU 空闲 | **0-0.1%** |
 | CPU 激活 | ~0.1% (DSP) |

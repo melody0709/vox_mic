@@ -2,6 +2,18 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
+## v0.6.8 (2026-09-08)
+
+### Demand Mode memory stability
+
+| Fix | Description |
+|-----|-------------|
+| **Core Audio session discovery** | Replaced the 200 ms full session re-enumeration with one initial enumeration plus `OnSessionCreated` handoff to the monitor thread. This removes the AudioSes private-memory growth caused by repeatedly creating enumerators while per-session callbacks remain registered. |
+| **State reliability preserved** | The 200 ms pass still refreshes every tracked session with `GetState()` and retains the existing 400 ms deactivation grace, fail-open behavior, and expired-session cleanup. |
+| **Release identity** | Bumped desktop/Android to `0.6.8` / Android `versionCode=14`. |
+
+---
+
 ## v0.6.7 (2026-09-04)
 
 ### Demand Mode session tracking reliability

@@ -46,6 +46,8 @@ private:
     class SessionObserver;
     friend class SessionObserver;
 
+    void enumerateExistingSessions();
+    void drainPendingSessions();
     void registerEventsOnSession(IAudioSessionControl* session);
     void unregisterAllSessions();
     void cleanupExpiredSessions();
@@ -64,6 +66,9 @@ private:
     HANDLE m_wakeEvent{nullptr};
     std::atomic<bool> m_initialized{false};
     std::atomic<bool> m_stopping{false};
+
+    std::mutex m_pendingSessionsMutex;
+    std::vector<IAudioSessionControl*> m_pendingSessions;
 
     mutable std::mutex m_sessionsMutex;
     std::vector<SessionObserver*> m_sessions;

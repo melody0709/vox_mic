@@ -176,8 +176,8 @@ void micMonitorThread() {
     }
 
     while (g_running.load(std::memory_order_relaxed)) {
-        // Events provide the fast path. Reconciliation repairs a missed or
-        // reordered Core Audio callback within one interval.
+        // Events discover sessions and provide the fast state path. The
+        // periodic pass refreshes already tracked states and applies debounce.
         g_micMonitor.reconcile();
         g_micMonitor.waitForChange(200);
     }

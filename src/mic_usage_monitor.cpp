@@ -239,11 +239,24 @@ STDMETHODIMP_(ULONG) MicUsageMonitor::Release() {
 }
 
 STDMETHODIMP MicUsageMonitor::OnSessionCreated(IAudioSessionControl* newSession) {
-    // Do not call COM methods or take locks in a session callback. Wake the
-    // owner thread; it will enumerate and register the new session there.
-    if (newSession && !m_stopping.load(std::memory_order_acquire) && m_wakeEvent) {
-        SetEvent(m_wakeEvent);
+    if (!newSession || m_stopping.load(std::memory_order_acquire)) return S_OK;
+
+    // Keep the callback short and defer identity/state queries to the MTA owner
+    // thread. The callback-provided control is valid only for this call unless
+    // we retain it explicitly.
+    newSession->AddRef();
+    bool queued = false;
+    try {
+        std::lock_guard<std::mutex> lock(m_pendingSessionsMutex);
+        if (!m_stopping.load(std::memory_order_acquire)) {
+            m_pendingSessions.push_back(newSession);
+            queued = true;
+            if (m_wakeEvent) SetEvent(m_wakeEvent);
+        }
+    } catch (...) {
+        // Never allow an allocation failure to escape across the COM callback.
     }
+    if (!queued) newSession->Release();
     return S_OK;
 }
 
@@ -426,6 +439,36 @@ void MicUsageMonitor::unregisterAllSessions() {
     }
 }
 
+void MicUsageMonitor::enumerateExistingSessions() {
+    IAudioSessionEnumerator* enumerator = nullptr;
+    if (FAILED(m_pSessionManager->GetSessionEnumerator(&enumerator))) return;
+
+    int count = 0;
+    enumerator->GetCount(&count);
+    for (int i = 0; i < count; ++i) {
+        IAudioSessionControl* session = nullptr;
+        if (SUCCEEDED(enumerator->GetSession(i, &session))) {
+            registerEventsOnSession(session);
+            session->Release();
+        }
+    }
+    enumerator->Release();
+}
+
+void MicUsageMonitor::drainPendingSessions() {
+    std::vector<IAudioSessionControl*> pending;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingSessionsMutex);
+        pending.swap(m_pendingSessions);
+    }
+
+    const bool stopping = m_stopping.load(std::memory_order_acquire);
+    for (IAudioSessionControl* session : pending) {
+        if (!stopping) registerEventsOnSession(session);
+        session->Release();
+    }
+}
+
 bool MicUsageMonitor::init() {
     if (m_initialized.load(std::memory_order_acquire)) return true;
     m_stopping.store(false, std::memory_order_release);
@@ -515,9 +558,11 @@ bool MicUsageMonitor::init() {
     m_initialized.store(true, std::memory_order_release);
 
     // Register notifications before the first enumeration as required by the
-    // Core Audio session notification contract.
+    // Core Audio session notification contract. Further sessions arrive via
+    // OnSessionCreated and are transferred to this MTA owner thread.
+    enumerateExistingSessions();
     reconcile();
-    printf("MicUsageMonitor: initialized (per-session events + reconciliation)\n");
+    printf("MicUsageMonitor: initialized (event-driven discovery + state reconciliation)\n");
     fflush(stdout);
     return true;
 }
@@ -528,19 +573,9 @@ void MicUsageMonitor::reconcile() {
         return;
     }
 
-    IAudioSessionEnumerator* enumerator = nullptr;
-    if (SUCCEEDED(m_pSessionManager->GetSessionEnumerator(&enumerator))) {
-        int count = 0;
-        enumerator->GetCount(&count);
-        for (int i = 0; i < count; ++i) {
-            IAudioSessionControl* session = nullptr;
-            if (SUCCEEDED(enumerator->GetSession(i, &session))) {
-                registerEventsOnSession(session);
-                session->Release();
-            }
-        }
-        enumerator->Release();
-    }
+    // Do not re-enumerate here. AudioSes retains memory when session-event
+    // callbacks are registered while new enumerators are repeatedly created.
+    drainPendingSessions();
 
     std::vector<SessionObserver*> snapshot;
     {
@@ -591,6 +626,7 @@ void MicUsageMonitor::shutdown() {
         m_sessionNotificationRegistered = false;
     }
 
+    drainPendingSessions();
     unregisterAllSessions();
 
     if (m_pSessionManager) {

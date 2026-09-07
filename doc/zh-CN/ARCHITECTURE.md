@@ -52,7 +52,7 @@ voxmic.exe
 | `tray_icon.h/cpp` | 系统托盘 + 右键菜单 (含灰度版本号) |
 | `config.h/cpp` | config.ini 持久化 (**20 字段**) |
 | `settings_dialog.h/cpp` | **主窗口** GUI (设备/网络/App/音效/DSP/Debug，非模态持久窗口) |
-| **`mic_usage_monitor.h/cpp`** | 逐会话 `IAudioSessionEvents`、周期校准、Demand Mode 防抖与 fail-open 策略 |
+| **`mic_usage_monitor.h/cpp`** | 一次性会话初始化、事件驱动的新会话发现、已跟踪状态校准、Demand Mode 防抖与 fail-open 策略 |
 | **`mic_session_state.h`** | 带会话身份的幂等活动状态跟踪器，供 monitor 与回归测试复用 |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
 | **`dsp/pipeline.h`** | DSP 链调度 (RNNoise/DPDFNet→HPF→EQ→Comp→Limiter) |
@@ -120,7 +120,7 @@ voxmic.exe
 
 ```
 main thread:         消息泵 + SetTimer(stats, 5s)
-monitor thread:      独占 MTA COM apartment；逐会话回调 + 200ms enumerate/GetState 状态校准
+monitor thread:      独占 MTA COM apartment；一次性枚举 + 事件驱动发现 + 200ms 已跟踪会话 GetState 状态校准
 bridge thread:       ADB 一次性初始化 (CreateProcess NO_WINDOW) + Socket 按需连接 (idle 5s 断连, connect ~0.4ms) → g_micRequested 门控 → ring buffer push/discard
 render thread:       事件驱动 ring buffer pop → int16→float → DspPipeline → WASAPI write
 DPDFNet worker:      带 epoch tag 的 SPSC 输入队列 → epoch-aware reset → sherpa-onnx Run() → 校验后的带 tag 输出 FIFO → 固定 480 帧；失败 worker 等待 stop；渲染线程不做 DLL/模型 I/O

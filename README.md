@@ -13,9 +13,9 @@ Android Phone Mic -> [VoxMic Source App] -> ADB -> This Program -> VB-CABLE -> W
                                     [DSP] RNNoise/DPDFNet -> HPF -> EQ -> Comp -> Limiter
 ```
 
-## v0.6.7 Demand Mode reliability
+## v0.6.8 Demand Mode memory stability
 
-Demand Mode uses one observer per Windows capture session. Core Audio events provide immediate activation, while a 200 ms reconciliation pass repairs missed or reordered callbacks. Deactivation has a 400 ms grace period so rapid stop/start sequences do not discard the next recording. Signal amplitude is never used as an activity decision: a silent user is still an active capture session.
+Demand Mode uses one observer per Windows capture session. Existing sessions are enumerated once and later sessions arrive through Core Audio notifications; a 200 ms pass refreshes only already tracked states to repair missed or reordered state callbacks. Deactivation has a 400 ms grace period so rapid stop/start sequences do not discard the next recording. Signal amplitude is never used as an activity decision: a silent user is still an active capture session.
 
 Periodic Stats report active/tracked sessions, reconciliation corrections, source blocks received/discarded/pushed, and render underruns. The Android source also reports PCM RMS, peak, and exact-zero ratio once per second when the updated app is installed.
 
@@ -99,12 +99,12 @@ The vendored payload contains the sherpa-onnx C API header, three Windows x64 ru
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.7.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.8.apk"
 ```
 
 ## Performance
 
-| Metric | v0.6.7 |
+| Metric | v0.6.8 |
 |--------|--------|
 | CPU Idle | **0-0.1%** |
 | CPU Active | ~0.1% (DSP) |

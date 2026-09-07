@@ -2,6 +2,18 @@
 
 **简体中文** | [English](../../CHANGELOG.md)
 
+## v0.6.8 (2026-09-08)
+
+### Demand Mode 内存稳定性
+
+| 修复 | 说明 |
+|------|------|
+| **Core Audio 会话发现** | 将每 200ms 全量重新枚举改为“初始化枚举一次 + `OnSessionCreated` 转交 monitor 线程”。不再在逐会话回调保持注册时反复创建 enumerator，从而消除 AudioSes 私有内存持续增长。 |
+| **保留状态可靠性** | 200ms 校准仍会对每个已跟踪会话调用 `GetState()`，并保留 400ms 退出防抖、fail-open 与过期会话清理。 |
+| **发布身份** | 桌面端/Android 升级为 `0.6.8` / Android `versionCode=14`。 |
+
+---
+
 ## v0.6.7 (2026-09-04)
 
 ### Demand Mode 会话跟踪可靠性

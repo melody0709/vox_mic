@@ -18,7 +18,7 @@
 |---|------|---------|------|
 | 1 | `src/version.h` | `#define APP_VERSION` | `"x.y.z"` |
 | 2 | `android_app/app/build.gradle` | `versionName` | 同步 `APP_VERSION` 字符串 |
-| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=12) |
+| 3 | `android_app/app/build.gradle` | `versionCode` | +1 (上次=14) |
 
 `src/tray_icon.cpp` 已通过 `#include "version.h"` 自动同步，无需手动修改。
 
@@ -128,7 +128,7 @@ render:    ring buffer pop → int16→float → DspPipeline → WASAPI write
 | 机制 | 触发 | 延迟 | 开销 |
 |------|------|------|------|
 | 逐会话 `OnStateChanged` | COM 回调 | 即时 | 事件驱动 |
-| 会话状态校准 | 枚举 + `GetState()` | 漏事件最多 200ms 修复 | 每秒 5 次 |
+| 会话状态校准 | 已跟踪会话 `GetState()` | 状态漏事件最多 200ms 修复 | 每秒 5 次 |
 | 最后会话退出 | 无活跃会话 | 400ms 防抖 | 校准循环计时 |
 | renderStallScore | render event 3×超时 | ~6s | 既有 render 保护 |
 | Monitor 初始化失败 | COM/设备/session manager 失败 | 立即 fail-open | 重启前连续传音 |
@@ -165,6 +165,6 @@ DSP: 可选 RNNoise/DPDFNet 降噪 → HPF(80Hz) → EQ(6-band, Pres 0-6dB, Bass
 
 ### Monitor 三层检测
 
-1. **逐会话 COM 事件** (`IAudioSessionNotification` + 每个采集会话一个 `IAudioSessionEvents` observer)：靶向 CABLE Output 采集端点（`EnumAudioEndpoints(eCapture)` 按名匹配，找不到时 fallback 默认端点）；回调路径只发布原子状态并唤醒 monitor 线程。
-2. **200ms 状态校准** (`mic_usage_monitor.cpp`)：重新枚举会话并调用 `GetState()`，修复遗漏或乱序回调；最后一个会话 inactive 后有 400ms 退出防抖。信号音量不再用于判断会话活动。
+1. **逐会话 COM 事件** (`IAudioSessionNotification` + 每个采集会话一个 `IAudioSessionEvents` observer)：靶向 CABLE Output 采集端点（`EnumAudioEndpoints(eCapture)` 按名匹配，找不到时 fallback 默认端点）。初始化时只枚举一次已有会话；后续 `OnSessionCreated` 保留并排队新会话，交给 monitor 线程处理。状态回调只发布原子状态并唤醒 monitor 线程。
+2. **200ms 状态校准** (`mic_usage_monitor.cpp`)：只对已跟踪会话调用 `GetState()`，修复遗漏或乱序的状态回调；不再周期性创建 session enumerator。最后一个会话 inactive 后有 400ms 退出防抖。信号音量不再用于判断会话活动。
 3. **Render event 超时** (`wasapi_output.cpp`)：连续 3 次 `WaitForSingleObject` 超时 → `renderStallScore=3`，bridge 用 `effectiveActive = demandOff || (micRequested && !renderStalled)` 门控。Monitor 初始化失败时 fail-open，避免永久静音。

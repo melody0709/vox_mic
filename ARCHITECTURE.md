@@ -52,7 +52,7 @@ voxmic.exe
 | `tray_icon.h/cpp` | System tray + context menu (includes gray version number) |
 | `config.h/cpp` | config.ini persistence (**20 fields**) |
 | `settings_dialog.h/cpp` | **Main window** GUI (device/network/app/audio/DSP/Debug, modeless persistent window) |
-| **`mic_usage_monitor.h/cpp`** | Per-session `IAudioSessionEvents`, periodic reconciliation, Demand Mode debounce/fail-open policy |
+| **`mic_usage_monitor.h/cpp`** | One-time session bootstrap, event-driven session discovery, tracked-state reconciliation, Demand Mode debounce/fail-open policy |
 | **`mic_session_state.h`** | Identity-aware, idempotent capture-session activity tracker used by the monitor and regression test |
 | **`dsp/biquad.h`** | BiQuad IIR (HPF/LowShelf/Peak/HighShelf) |
 | **`dsp/pipeline.h`** | DSP chain scheduling (RNNoise/DPDFNet->HPF->EQ->Comp->Limiter) |
@@ -123,7 +123,7 @@ voxmic.exe
 
 ```
 main thread:         Message pump + SetTimer(stats, 5s)
-monitor thread:      Owns the MTA COM apartment; per-session callbacks + 200ms enumerate/GetState reconciliation
+monitor thread:      Owns the MTA COM apartment; one-time enumeration + event-driven discovery + 200ms tracked-session GetState reconciliation
 bridge thread:       ADB one-time init (CreateProcess NO_WINDOW) + Socket on-demand connection (idle 5s disconnect, connect ~0.4ms) -> g_micRequested gate -> ring buffer push/discard
 render thread:       Event-driven ring buffer pop -> int16->float -> DspPipeline -> WASAPI write
 DPDFNet worker:      tagged SPSC input queue -> epoch-aware reset -> sherpa-onnx Run() -> validated tagged output FIFO -> fixed 480-sample blocks; failed worker blocks until stop; no DLL/model I/O on render
