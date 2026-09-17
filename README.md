@@ -83,7 +83,7 @@ build\run\x64-release\voxmic.exe
 ```cmd
 git lfs pull
 build.bat
-build.bat --test-dpdfnet
+build.bat --dpdfnet --test-dpdfnet
 build.bat --rnnoise-only
 build.bat --package
 ```
@@ -143,4 +143,4 @@ The DPDFNet worker smoke test on the reference machine reports about 1.7 ms infe
 
 ## Documentation
 
-[ARCHITECTURE.md](ARCHITECTURE.md) | [AGENTS.md](AGENTS.md) | [CHANGELOG.md](CHANGELOG.md) | [FUTURE_ROADMAP.md](FUTURE_ROADMAP.md) | [plan/completed/](plan/completed/) / [.plan/completed/](.plan/completed/) (historical plans)
+[ARCHITECTURE.md](ARCHITECTURE.md) | [AGENTS.md](AGENTS.md) | [BUILD.md](BUILD.md) | [CHANGELOG.md](CHANGELOG.md) | [FUTURE_ROADMAP.md](FUTURE_ROADMAP.md) | [.plan/completed/](.plan/completed/) (historical plans)

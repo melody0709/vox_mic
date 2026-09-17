@@ -49,6 +49,7 @@
 
 | Phase | 内容 | 工时 | 优先级 |
 |-------|------|------|--------|
+| — | **C++23 + Slint C++ 界面重构**（计划：`.plan/refactor/cxx23-slint-refactor-plan.md`） | 多阶段 | **高** |
 | Phase 4 | 电源管理 (WM_POWERBROADCAST) | 30min | 低 |
 | Phase 6C | DeepFilterNet3 升级 (可选) | 4h | 低 |
 | — | 自定义托盘图标 (.ico 三种状态) | 1h | 低 |
@@ -73,4 +74,6 @@
 | ~~11~~ | ~~CPU 优化 + 事件驱动 Monitor~~ | ✅ v0.4.2 |
 | ~~12~~ | ~~Socket 按需连接~~ | ✅ v0.5.0 |
 | ~~13~~ | ~~scrcpy forward 自动恢复~~ | ✅ v0.5.3 |
+| 14 | 自定义托盘图标 | 1h | -- |
+| 15 | C++23 + Slint 界面重构 | 进行中 | -- |
 | 14 | 自定义图标 | 1h | — |

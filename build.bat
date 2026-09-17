@@ -30,6 +30,14 @@ if "%TEST_DPDFNET%"=="1" if "%ENABLE_DPDFNET%"=="0" (
     exit /b 2
 )
 
+REM Architecture guardrails (ratcheting baselines). Cheap, so run it before
+REM any configure/build work; a violation must fail fast, not after 2 minutes.
+if not "%MODE%"=="clean" (
+    echo Checking architecture guardrails...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\check_architecture.ps1"
+    if errorlevel 1 ( echo Architecture guardrail FAILED. & exit /b 1 )
+)
+
 REM Locate Visual Studio 2022 (provides MSVC + CMake + Ninja)
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VS_PATH="

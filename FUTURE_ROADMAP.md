@@ -49,6 +49,7 @@
 
 | Phase | Content | Effort | Priority |
 |-------|---------|--------|----------|
+| -- | **C++23 + Slint C++ UI refactor** (plan: `.plan/refactor/cxx23-slint-refactor-plan.md`) | multi-stage | **High** |
 | Phase 4 | Power management (WM_POWERBROADCAST) | 30min | Low |
 | Phase 6C | DeepFilterNet3 upgrade (optional) | 4h | Low |
 | -- | Custom tray icons (.ico three states) | 1h | Low |
@@ -74,3 +75,4 @@
 | ~~12~~ | ~~Socket on-demand connection~~ | Done | v0.5.0 |
 | ~~13~~ | ~~scrcpy forward auto-recovery~~ | Done | v0.5.3 |
 | 14 | Custom icons | 1h | -- |
+| 15 | C++23 + Slint UI refactor | in progress | -- |

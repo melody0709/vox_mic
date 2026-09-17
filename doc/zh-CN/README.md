@@ -83,7 +83,7 @@ build\run\x64-release\voxmic.exe
 ```cmd
 git lfs pull
 build.bat
-build.bat --test-dpdfnet
+build.bat --dpdfnet --test-dpdfnet
 build.bat --rnnoise-only
 build.bat --package
 ```
@@ -143,4 +143,4 @@ adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.8.apk
 
 ## 文档
 
-[ARCHITECTURE.md](ARCHITECTURE.md) | [AGENTS.md](AGENTS.md) | [CHANGELOG.md](CHANGELOG.md) | [FUTURE_ROADMAP.md](FUTURE_ROADMAP.md) | [plan/completed/](../../plan/completed/) / [.plan/completed/](../../.plan/completed/) (历史计划)
+[ARCHITECTURE.md](ARCHITECTURE.md) | [AGENTS.md](../../AGENTS.md) | [BUILD.md](../../BUILD.md) | [CHANGELOG.md](CHANGELOG.md) | [FUTURE_ROADMAP.md](FUTURE_ROADMAP.md) | [.plan/completed/](../../.plan/completed/) (历史计划)

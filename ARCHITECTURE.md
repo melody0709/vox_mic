@@ -178,3 +178,60 @@ third_party/dpdfnet/
 ```
 
 After cloning, run `git lfs pull`. `build.bat --dpdfnet` verifies the vendored files, stages them under `build/cmake/x64-release/_deps/dpdfnet`, and installs the DLLs under the executable directory plus the model under `models/`. CMake compiles the adapter against that pinned C API header, but the executable still resolves every DLL symbol dynamically and has no sherpa-onnx import-library dependency. The runtime manifest includes every installed file, so deleting `build/` only removes generated output. If any optional file or required C API symbol is missing at runtime, the process still starts with RNNoise.
+
+## Runtime Parameters
+
+| Parameter | Value | Location |
+|-----------|-------|----------|
+| FRAMES_PER_BLOCK / BLOCK_SIZE | 480 / 960B | `wasapi_output.h:14-16` |
+| SAMPLE_RATE | 48000 Hz | `wasapi_output.h:12` |
+| RING_BUFFER_BLOCKS | 128 | `wasapi_output.h:17` |
+| WASAPI buffer | ~22ms (shared mode lower limit) | `wasapi_output.cpp:73` |
+| Ring buffer watermarks | 3 -> 2 | `main.cpp` |
+| Android AudioRecord | 1x minBufSize | `RecordService.java` |
+| Total latency | ~40ms (measured) | |
+
+### On-demand Activation
+
+| Mechanism | Trigger | Latency | Overhead |
+|-----------|---------|---------|----------|
+| Per-session `OnStateChanged` | COM callback | Immediate | Event-driven |
+| Session reconciliation | tracked-session `GetState()` | <=200ms missed-state-event repair | 5 passes/sec |
+| Final-session deactivation | no active sessions | 400ms grace | Timer check in reconciliation |
+| renderStallScore | render event 3x timeout | ~6s | Existing render guard |
+| Monitor initialization failure | COM/device/session-manager failure | Immediate fail-open | Continuous audio until restart |
+
+| Threshold | Value |
+|-----------|-------|
+| Socket stall disconnect | 9s (90x100ms) |
+| Socket idle disconnect | 5s (500 blocks, AlwaysHot OFF) |
+| Ring buffer reset | Every 50 blocks (0.5s) |
+| Bridge reconnect | ~0.3-0.8ms QPC |
+
+## DSP Atomic Variables
+
+Configuration has 20 fields persisted in `config.ini`. `syncDspAtomsFromConfig()`
+(`main.cpp`) is called on startup and on reconnect.
+
+| Atomic Variable | Purpose | Thread |
+|-----------------|---------|--------|
+| `g_gain` | Gain multiplier | bridge -> render |
+| `g_nrEnabled` / `g_eqEnabled` / `g_compressorEnabled` | DSP toggles | bridge -> render |
+| `g_nrStrength` | NR denoising strength (0.3-0.95) | bridge -> render |
+| `g_denoiseBackend` | Requested backend (`rnnoise`/`dpdfnet`) | settings -> render |
+| `g_denoiseEffectiveBackend` | Effective backend after availability/fallback | render -> settings |
+| `g_dpdfnetAvailable` | DPDFNet runtime/model/session availability | render -> settings |
+| `g_dpdfnetDegraded` | Ready DPDFNet worker was stalled and is temporarily on RNNoise | render -> settings |
+| `g_denoiseResetEpoch` | Stream/backend reset notification | bridge/settings -> render |
+| `g_eqPresence` / `g_eqBassCut` | EQ parameters | bridge -> render |
+| `g_micRequested` | Whether an app is capturing | monitor -> bridge |
+| `g_micStreaming` | Whether streaming | bridge -> tray |
+| `g_micOnTick` | Detection latency timestamp | monitor -> bridge |
+| `g_demandMode` | Demand Mode toggle | tray -> monitor/bridge |
+| `g_alwaysHot` | Always Hot toggle | tray -> bridge |
+
+## Monitor Three-layer Detection
+
+1. **Per-session COM events** (`IAudioSessionNotification` + one `IAudioSessionEvents` observer per capture session): targets the CABLE Output capture endpoint (`EnumAudioEndpoints(eCapture)` name match, fallback to default if not found). Existing sessions are enumerated once at initialization; `OnSessionCreated` retains and queues later sessions for the monitor thread. State callbacks publish atomic state and wake the monitor thread.
+2. **200 ms reconciliation** (`mic_usage_monitor.cpp`): calls `GetState()` only on already tracked sessions to repair missed/reordered state callbacks; it never repeatedly creates session enumerators. The final inactive transition uses a 400 ms grace period. Signal amplitude is never used as session activity.
+3. **Render event timeout** (`wasapi_output.cpp`): 3 consecutive `WaitForSingleObject` timeouts -> `renderStallScore=3`; the bridge uses the `effectiveActive = demandOff || (micRequested && !renderStalled)` gate. Monitor initialization failure is fail-open so it cannot permanently mute the source.
