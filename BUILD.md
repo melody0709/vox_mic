@@ -96,10 +96,22 @@ build\cmake\x64-release\dpdfnet_failure_smoke.exe build\run\x64-release build\ru
 
 ## Known Shutdown Limitation
 
-The watchdog cannot cancel a native sherpa-onnx `Run()` call that never returns.
-The current worker is never detached before its denoiser/DLL resources are released;
-this remains a documented shutdown limitation until a future process-isolated adapter
-is available.
+The worker still cannot be forcibly cancelled while it is inside a native
+sherpa-onnx `Run()` call. What changed is that this no longer hangs the
+application:
+
+- `DpdfnetProcessor::WORKER_STOP_TIMEOUT_MS` (2 s) bounds how long shutdown
+  waits for the worker to observe its `std::stop_token`.
+- When the budget expires the thread is detached and the session is abandoned:
+  its events, denoiser and loaded library are deliberately leaked, because the
+  worker may still be using them. `workerAbandoned()` reports this, the
+  processor reports itself as not ready, and `prepare()` refuses to reuse the
+  session - so DPDFNet stays on RNNoise until the process restarts.
+- Regression cover: `dpdfnet_failure_smoke` parks a worker in a 10 s sleep and
+  asserts that shutdown still returns inside the budget.
+
+Reclaiming those leaked resources needs a process-isolated adapter, which is
+still the only real fix.
 
 ## build/ Layout
 

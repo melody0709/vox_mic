@@ -47,6 +47,17 @@ bool SocketClient::connect(const std::string& host, int port) {
         return false;
     }
 
+    // Bound every blocking read. Without this, a peer that stalls part-way
+    // through a block leaves recv() parked indefinitely; the bridge loop can
+    // then never observe g_running going false, and main()'s bridge.join()
+    // hangs for good. A timeout turns that into an ordinary recovery path.
+    DWORD recvTimeoutMs = static_cast<DWORD>(RECV_TIMEOUT_MS);
+    if (setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO,
+            reinterpret_cast<const char*>(&recvTimeoutMs),
+            sizeof(recvTimeoutMs)) == SOCKET_ERROR) {
+        printf("setsockopt(SO_RCVTIMEO) failed: %d\n", WSAGetLastError());
+    }
+
     return true;
 }
 
@@ -66,10 +77,14 @@ int SocketClient::recvExact(uint8_t* buffer, int size) {
     int total = 0;
     while (total < size) {
         int n = recv(m_socket, (char*)(buffer + total), size - total, 0);
-        if (n <= 0) {
-            return n;
+        if (n > 0) {
+            total += n;
+            continue;
         }
-        total += n;
+        if (n == 0) return 0;
+        const int err = WSAGetLastError();
+        if (err == WSAETIMEDOUT) return RECV_TIMEOUT;
+        return RECV_ERROR;
     }
     return total;
 }

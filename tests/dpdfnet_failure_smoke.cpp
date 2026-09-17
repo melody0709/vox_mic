@@ -43,6 +43,47 @@ static bool runInvalidOutputFault(const std::wstring& runtimeDirectory,
         !processor.validationTestFailedForTest();
 }
 
+// A worker that cannot observe the stop request must not be able to block
+// shutdown. setWorkerDelayForTest() parks the worker inside its own Sleep(),
+// which has the same shape as being stuck inside the native Run() call: the
+// stop request cannot be seen until that sleep ends. Before the shutdown budget
+// existed this destructor would have waited out the full delay; it must now
+// give up at the budget instead of hanging.
+static bool runAbandonedWorkerCase(const std::wstring& runtimeDirectory,
+    const std::wstring& modelPath, ULONGLONG* elapsedMs) {
+    const ULONGLONG start = GetTickCount64();
+    {
+        DpdfnetProcessor processor;
+        std::string error;
+        if (!processor.prepare(runtimeDirectory, modelPath, 48000, 480, &error)) {
+            std::printf("ERROR: abandon-case prepare failed: %s\n", error.c_str());
+            return false;
+        }
+
+        float input[DPDFNET_BLOCK_SAMPLES]{};
+        float output[DPDFNET_BLOCK_SAMPLES]{};
+        processor.setWorkerDelayForTest(10000);
+        processor.processBlock(input, output, 1);
+        Sleep(300); // let the worker pick the block up and enter the delay
+    }
+    *elapsedMs = GetTickCount64() - start;
+
+    const ULONGLONG budgetMs = DpdfnetProcessor::WORKER_STOP_TIMEOUT_MS;
+    if (*elapsedMs + 200 < budgetMs) {
+        std::printf("ERROR: abandoned worker did not wait out the budget "
+            "(%llums < %llums)\n",
+            static_cast<unsigned long long>(*elapsedMs),
+            static_cast<unsigned long long>(budgetMs));
+        return false;
+    }
+    if (*elapsedMs >= budgetMs + 2000) {
+        std::printf("ERROR: shutdown was not bounded (%llums)\n",
+            static_cast<unsigned long long>(*elapsedMs));
+        return false;
+    }
+    return true;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::printf("Usage: dpdfnet_failure_smoke <runtime-directory> <model-path>\n");
@@ -110,9 +151,17 @@ int main(int argc, char** argv) {
     destructorEnd = GetTickCount64();
 
     const ULONGLONG destructorMs = destructorEnd - destructorStart;
-    std::printf("DPDFNet failure smoke OK: invalid_faults=4 failed=%d ready=%d destructor=%llums\n",
+
+    ULONGLONG abandonedMs = 0;
+    if (!runAbandonedWorkerCase(runtimeDirectory, modelPath, &abandonedMs)) {
+        return 1;
+    }
+
+    std::printf("DPDFNet failure smoke OK: invalid_faults=4 failed=%d ready=%d "
+        "destructor=%llums abandoned=%llums\n",
         failed ? 1 : 0, readyAfterFailure ? 1 : 0,
-        static_cast<unsigned long long>(destructorMs));
+        static_cast<unsigned long long>(destructorMs),
+        static_cast<unsigned long long>(abandonedMs));
     if (destructorMs >= 100) {
         std::printf("ERROR: failed worker destructor exceeded 100ms\n");
         return 1;

@@ -413,7 +413,12 @@ void audioBridgeThread() {
 
             int received = socketClient.recvExact(buffer, BLOCK_SIZE);
             if (received <= 0) {
-                printf("Socket lost, reconnecting\n");
+                if (received == SocketClient::RECV_TIMEOUT) {
+                    printf("Socket read stalled mid-block (%dms), reconnecting\n",
+                        SocketClient::RECV_TIMEOUT_MS);
+                } else {
+                    printf("Socket lost, reconnecting\n");
+                }
                 fflush(stdout);
                 socketClient.disconnect();
                 requestDenoiseReset();

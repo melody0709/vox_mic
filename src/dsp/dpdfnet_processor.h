@@ -38,6 +38,20 @@ public:
 
     bool isReady() const;
     bool hasFailed() const;
+
+    // Upper bound on how long shutdown waits for the worker before giving up
+    // and abandoning the session. The native Run() call cannot be interrupted
+    // from the outside, so without a budget a stuck worker would hang the whole
+    // application on a join() that never returns. Exposed so tests and callers
+    // share one source of truth.
+    static constexpr unsigned int WORKER_STOP_TIMEOUT_MS = 2000;
+
+    // True once a worker had to be abandoned because it would not stop inside
+    // the shutdown budget (it was stuck inside the native runtime). The session
+    // is then leaked rather than freed, reports itself as not ready, and
+    // prepare() refuses to reuse it - a restart is needed to get DPDFNet back.
+    bool workerAbandoned() const;
+
     const std::string& prepareError() const;
 
     uint64_t inputDrops() const;

@@ -365,6 +365,64 @@ BUILD_EXIT=0        slint-compiler 生成 slint_generated_app_1.cpp → main.cpp
 
 ---
 
+## 13. 实施进度
+
+| 步骤 | 状态 | 提交 | 验证证据 |
+|---|---|---|---|
+| B0 准备落定 | ✅ | `cb43ae2` `30183eb` `40a992f` `bfca2d7` | SDK 编译运行实测；守卫落地并校准 |
+| B1 C++23 | ✅ | `89faf1d` | 7 个 target 全绿（0 error / 0 warning）；守卫 PASS；托盘常驻 14.2 MB |
+| B2 两个挂死点 | ✅ | 本轮 | 单元测试 + 4 个冒烟全过；放弃路径实测 2437 ms 返回（预算 2 s） |
+| B3 解耦（Command / StateSnapshot） | ⏳ | | |
+| B4 接入 Slint（含 AboutSlint） | ⏳ | | |
+| B5 主题 + 迁移 20 个配置项 | ⏳ | | |
+| B6 按需创建/销毁验证 | ⏳ | | |
+| B7 打包（随包带 `slint_cpp.dll`） | ⏳ | | |
+
+### B2 实施细节
+
+**socket 侧**
+
+- `SocketClient::connect()` 设置 `SO_RCVTIMEO = 500 ms`（`RECV_TIMEOUT_MS`）。
+- `recvExact()` 改为区分三种结果：`>0` 成功 / `0` 对端关闭 / `RECV_TIMEOUT` / `RECV_ERROR`，
+  `main.cpp` 据此打印 "stalled mid-block" 与 "lost" 两种不同日志——让"为什么重连"可从日志回答。
+
+**DPDFNet worker 侧**
+
+- `std::thread` → **`std::jthread` + `std::stop_token`**（裸线程基线 4 → 3）。
+- `stopWorker()` 改为**有界等待**：`request_stop` → 轮询 `workerExited` 最多
+  `WORKER_STOP_TIMEOUT_MS`（2 s，公开常量，测试与调用方共用同一真相源）。
+- 超时则：`detach()` + 置 `workerAbandoned` + **跳过全部资源释放**（事件 / denoiser / DLL 全部故意泄漏，
+  因为它们可能仍被卡住的 worker 使用），并打印诊断。
+- `~DpdfnetProcessor` 在已放弃时 `m_impl.release()`，不释放 Impl（否则 use-after-free）。
+- `isReady()` / `hasFailed()` 纳入放弃状态 → 管线自动降级回 RNNoise；
+  `prepare()` 拒绝复用被污染的会话，要求重启。
+
+**途中发现并修掉的两个自身缺陷**（先追代码才暴露，值得记录）：
+
+1. `stopWorker()` 在**已放弃**的 Impl 上被二次调用时，会跳过 join 分支直接走到资源释放
+   → 会在 worker 仍持有时关掉事件、销毁 denoiser、卸载 DLL。→ 已加顶部早退。
+2. `prepare()` 只在**进入时**检查放弃标记，而 `stopWorker()` 可能恰在**本次调用中**才放弃
+   → 会在被污染的 Impl 上重建 worker。→ 已在 `stopWorker()` 之后加复查。
+
+**回归测试**：`tests/dpdfnet_failure_smoke.cpp` 新增 `runAbandonedWorkerCase()`——
+用 `setWorkerDelayForTest(10000)` 把 worker 停在 10 秒 sleep 里（与"卡在 native Run()"同形），
+断言析构仍在预算内返回（不许死等满 10 秒），实测 `abandoned=2437 ms`。
+
+**守卫基线临时抬高**（按守卫自身规则，理由须在提交信息中说明）：
+`src/main.cpp` 650 → 655、`src/dsp/dpdfnet_processor.cpp` 728 → 814。
+⚠️ **B3 拆解 `main.cpp`、B5 重写 `dpdfnet_processor.cpp` 之后，两者必须回落到 650 / 728 以下。**
+
+### 本机构建方式（与 `build.bat` 的差异，仅为绕开环境限制）
+
+本机沙箱有两条硬限制：`reg.exe` 在程序黑名单里（`vcvars64.bat` 内部要调它，因此跑不起来），
+且本会话进程环境同时存在 `Path` 与 `PATH`，会让 MSBuild 抛 `MSB6001`。
+因此本轮验证走的是**手工喂 MSVC 环境 + Ninja 直连 `cl.exe`**——
+用同一个已配置好的 `build/cmake/x64-release` 构建树，工具链与 `build.bat` 完全一致。
+**`build.bat` 仍是标准入口**，在正常终端里用它没有这些问题。
+另有已知偶发：并行编译时个别 `.obj` 创建被拒（`C1083 Permission denied`），重试即过。
+
+---
+
 ## 附：视觉设计规范（自行设计，不继承参考项目）
 
 **已否决：不继承参考项目 `stock_new` 的视觉规范**（2026-09-17 决定）。

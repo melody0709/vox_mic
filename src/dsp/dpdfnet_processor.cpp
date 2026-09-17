@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -157,14 +158,26 @@ struct DpdfnetProcessor::Impl {
     static constexpr size_t FIFO_CAPACITY = DPDFNET_BLOCK_SAMPLES * 64;
     static constexpr int MAX_OUTPUT_SAMPLES = DPDFNET_BLOCK_SAMPLES * 4;
 
+    // Shutdown budget comes from the public header so callers and tests share
+    // one source of truth.
+    static constexpr DWORD STOP_TIMEOUT_MS =
+        static_cast<DWORD>(DpdfnetProcessor::WORKER_STOP_TIMEOUT_MS);
+
     SherpaOnnxApi api;
     const SherpaOnnxOnlineSpeechDenoiser* denoiser = nullptr;
-    std::thread worker;
+    // std::jthread + stop_token: cancellation becomes a first-class request
+    // instead of a plain flag, and the worker can publish that it actually
+    // finished so stopWorker() can bound its wait.
+    std::jthread worker;
     HANDLE wakeEvent = nullptr;
     HANDLE readyEvent = nullptr;
-    std::atomic<bool> stop{false};
     std::atomic<bool> ready{false};
     std::atomic<bool> failed{false};
+    std::atomic<bool> workerExited{false};
+    // Set when the worker refused to stop inside the shutdown budget. The
+    // session is then considered poisoned: it is neither safe to destroy (the
+    // thread may still be inside Run() touching this Impl) nor to reuse.
+    std::atomic<bool> workerAbandoned{false};
     std::atomic<uint64_t> requestedEpoch{1};
     uint64_t workerEpoch = 1;
 
@@ -253,7 +266,7 @@ struct DpdfnetProcessor::Impl {
         }
     }
 
-    void workerLoop() {
+    void workerLoop(std::stop_token stopToken) {
         float warmup[DPDFNET_BLOCK_SAMPLES]{};
         const SherpaOnnxDenoisedAudio* warmupAudio = api.run(
             denoiser, warmup, DPDFNET_BLOCK_SAMPLES, expectedSampleRate);
@@ -273,7 +286,7 @@ struct DpdfnetProcessor::Impl {
             std::memory_order_release);
         if (readyEvent) SetEvent(readyEvent);
 
-        while (!stop.load(std::memory_order_acquire)) {
+        while (!stopToken.stop_requested()) {
             if (failed.load(std::memory_order_acquire)) {
                 if (wakeEvent) WaitForSingleObject(wakeEvent, INFINITE);
                 continue;
@@ -375,12 +388,46 @@ struct DpdfnetProcessor::Impl {
             appendOutput(audio->samples, audio->n, workerEpoch);
             api.destroyAudio(audio);
         }
+
+        // Published last so stopWorker() can tell "finished" from "still stuck
+        // inside the native Run()" without having to join first.
+        workerExited.store(true, std::memory_order_release);
     }
 
     void stopWorker() {
-        stop.store(true, std::memory_order_release);
+        if (workerAbandoned.load(std::memory_order_acquire)) {
+            // Already abandoned: every resource below is deliberately kept
+            // alive because the worker may still be inside Run() using it.
+            return;
+        }
+        ready.store(false, std::memory_order_release);
+        worker.request_stop();
         signalWorker();
-        if (worker.joinable()) worker.join();
+        if (worker.joinable()) {
+            // Bounded wait. stop_token stops the loop cooperatively but cannot
+            // interrupt a call already inside sherpa-onnx Run(), so the thread
+            // is not guaranteed to return. Waiting forever here is exactly what
+            // used to hang shutdown for good.
+            const ULONGLONG deadline = GetTickCount64() + STOP_TIMEOUT_MS;
+            while (!workerExited.load(std::memory_order_acquire) &&
+                   GetTickCount64() < deadline) {
+                Sleep(5);
+            }
+
+            if (workerExited.load(std::memory_order_acquire)) {
+                worker.join();
+            } else {
+                // Give up safely: detach so ~jthread does not block, then skip
+                // every release below (see the guard above).
+                worker.detach();
+                workerAbandoned.store(true, std::memory_order_release);
+                printf("[DPDFNet] worker did not stop within %lu ms "
+                       "(stuck in native Run()?); abandoning session\n",
+                    static_cast<unsigned long>(STOP_TIMEOUT_MS));
+                fflush(stdout);
+                return;
+            }
+        }
         if (readyEvent) {
             CloseHandle(readyEvent);
             readyEvent = nullptr;
@@ -406,6 +453,13 @@ DpdfnetProcessor::DpdfnetProcessor()
 DpdfnetProcessor::~DpdfnetProcessor() {
 #if VOXMIC_ENABLE_DPDFNET
     m_impl->stopWorker();
+    if (m_impl->workerAbandoned.load(std::memory_order_acquire)) {
+        // stopWorker() already gave up on this session, which means the worker
+        // may still be executing inside the native runtime and touching this
+        // Impl. Freeing it now would be a use-after-free, so the session is
+        // deliberately leaked. The alternative is a hang or a crash.
+        (void)m_impl.release();
+    }
 #endif
 }
 
@@ -421,7 +475,26 @@ bool DpdfnetProcessor::prepare(const std::wstring& runtimeDirectory,
     if (errorMessage) *errorMessage = error;
     return false;
 #else
+    if (m_impl->workerAbandoned.load(std::memory_order_acquire)) {
+        // A previous worker could not be stopped and may still be inside Run()
+        // holding this Impl. Reusing the session would race with that thread,
+        // so refuse it and let the caller fall back to RNNoise.
+        m_impl->prepareError =
+            "a previous DPDFNet worker could not be stopped; restart required";
+        if (errorMessage) *errorMessage = m_impl->prepareError;
+        return false;
+    }
+
     m_impl->stopWorker();
+    // stopWorker() may have just given up on a stuck worker, which poisons this
+    // Impl. Re-checking is not redundant: the guard above only catches a session
+    // that was already abandoned, not one abandoned by the call we just made.
+    if (m_impl->workerAbandoned.load(std::memory_order_acquire)) {
+        m_impl->prepareError =
+            "a previous DPDFNet worker could not be stopped; restart required";
+        if (errorMessage) *errorMessage = m_impl->prepareError;
+        return false;
+    }
     m_impl->prepareError.clear();
     m_impl->failed.store(false, std::memory_order_release);
     m_impl->ready.store(false, std::memory_order_release);
@@ -553,10 +626,13 @@ bool DpdfnetProcessor::prepare(const std::wstring& runtimeDirectory,
         return false;
     }
 
-    m_impl->stop.store(false, std::memory_order_release);
+    m_impl->workerExited.store(false, std::memory_order_release);
     m_impl->requestedEpoch.store(1, std::memory_order_release);
     m_impl->workerEpoch = 1;
-    m_impl->worker = std::thread([impl = m_impl.get()] { impl->workerLoop(); });
+    m_impl->worker = std::jthread(
+        [impl = m_impl.get()](std::stop_token stopToken) {
+            impl->workerLoop(stopToken);
+        });
     const DWORD waitResult = WaitForSingleObject(m_impl->readyEvent, 10000);
     if (waitResult != WAIT_OBJECT_0 || m_impl->failed.load(std::memory_order_acquire)) {
         m_impl->prepareError = (waitResult == WAIT_TIMEOUT)
@@ -635,7 +711,8 @@ bool DpdfnetProcessor::processBlock(const float* input, float* output,
 bool DpdfnetProcessor::isReady() const {
 #if VOXMIC_ENABLE_DPDFNET
     return m_impl->ready.load(std::memory_order_acquire) &&
-        !m_impl->failed.load(std::memory_order_acquire);
+        !m_impl->failed.load(std::memory_order_acquire) &&
+        !m_impl->workerAbandoned.load(std::memory_order_acquire);
 #else
     return false;
 #endif
@@ -643,7 +720,16 @@ bool DpdfnetProcessor::isReady() const {
 
 bool DpdfnetProcessor::hasFailed() const {
 #if VOXMIC_ENABLE_DPDFNET
-    return m_impl->failed.load(std::memory_order_acquire);
+    return m_impl->failed.load(std::memory_order_acquire) ||
+        m_impl->workerAbandoned.load(std::memory_order_acquire);
+#else
+    return false;
+#endif
+}
+
+bool DpdfnetProcessor::workerAbandoned() const {
+#if VOXMIC_ENABLE_DPDFNET
+    return m_impl->workerAbandoned.load(std::memory_order_acquire);
 #else
     return false;
 #endif
