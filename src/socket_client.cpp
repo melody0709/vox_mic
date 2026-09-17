@@ -49,7 +49,7 @@ bool SocketClient::connect(const std::string& host, int port) {
 
     // Bound every blocking read. Without this, a peer that stalls part-way
     // through a block leaves recv() parked indefinitely; the bridge loop can
-    // then never observe g_running going false, and main()'s bridge.join()
+    // then never observe g_appState.running going false, and main()'s bridge.join()
     // hangs for good. A timeout turns that into an ordinary recovery path.
     DWORD recvTimeoutMs = static_cast<DWORD>(RECV_TIMEOUT_MS);
     if (setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO,

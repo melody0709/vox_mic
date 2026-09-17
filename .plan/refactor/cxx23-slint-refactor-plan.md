@@ -370,13 +370,54 @@ BUILD_EXIT=0        slint-compiler 生成 slint_generated_app_1.cpp → main.cpp
 | 步骤 | 状态 | 提交 | 验证证据 |
 |---|---|---|---|
 | B0 准备落定 | ✅ | `cb43ae2` `30183eb` `40a992f` `bfca2d7` | SDK 编译运行实测；守卫落地并校准 |
-| B1 C++23 | ✅ | `89faf1d` | 7 个 target 全绿（0 error / 0 warning）；守卫 PASS；托盘常驻 14.2 MB |
-| B2 两个挂死点 | ✅ | 本轮 | 单元测试 + 4 个冒烟全过；放弃路径实测 2437 ms 返回（预算 2 s） |
-| B3 解耦（Command / StateSnapshot） | ⏳ | | |
+| B1 C++23 | ✅ | `89faf1d` | 7 个 target 全绿（0 error / 0 warning）；守卫 PASS；托盘启动后常驻存活 |
+| B2 两个挂死点 | ✅ | `f0ad2ad` | 单元测试 + 4 个冒烟全过；放弃路径实测 2437 ms 返回（预算 2 s） |
+| B3 解耦（单一 `AppState`） | ✅ | 本轮 | **`extern` 30 → 0**；守卫 PASS；全部测试通过；托盘常驻存活 |
 | B4 接入 Slint（含 AboutSlint） | ⏳ | | |
 | B5 主题 + 迁移 20 个配置项 | ⏳ | | |
 | B6 按需创建/销毁验证 | ⏳ | | |
 | B7 打包（随包带 `slint_cpp.dll`） | ⏳ | | |
+
+### B6 的内存基准（已实测，供 B6 对照）
+
+托盘常驻、未推流时的稳态内存（B1 之后的构建，4 次启动结果一致）：
+
+```
+t = 5s / 10s / 15s / 20s    RSS 稳定 76.6 MB    private 稳定 51 MB
+```
+
+早前一次测到 14.2 MB，是进程尚未完成初始化的采样，**该数字作废，勿再引用**。
+B6 的判定口径：**托盘常驻时不加载任何 Slint UI，稳态不得高于上表。**
+
+### B3 实施细节
+
+**做法**：把跨线程共享状态收进单一 `AppState`（`src/app_state.h`），用 C++17 **`inline` 变量**
+实现——命名空间作用域的单一定义，因此**连 `extern` 声明都不需要**。
+选 `inline` 变量而非函数内 `static` 懒初始化单例，是因为 WASAPI 渲染线程每个音频块都要读这些原子，
+懒初始化会引入 guard 变量检查。此处无堆分配、无锁，符合实时路径红线。
+
+调度进来的成员（原先是散在各 TU 的 `extern`）：
+
+- DSP 设置 12 项：`gain` / `eqEnabled` / `eqPresence` / `eqBassCut` / `compressorEnabled` /
+  `nrEnabled` / `nrStrength` / `denoiseBackend` / `denoiseResetEpoch` /
+  `dpdfnetAvailable` / `dpdfnetDegraded` / `denoiseEffectiveBackend`
+- 运行标志 5 项：`running` / `micRequested` / `demandMode` / `alwaysHot` / `micOnTick`
+- 非实时状态：`config`、`trayIcon`
+- `DenoiseBackendKind` 枚举一并移入（它属于状态词汇表），`pipeline.h` 经 `app_state.h` 转出
+
+**同时消除的 3 个函数 `extern`**：`syncDspAtomsFromConfig` / `requestDenoiseReset` /
+`setDemandModeRuntime` —— 函数声明上的 `extern` 关键字本就冗余，改在 `app_state.h` 中声明
+（概念上它们正是 UI 发给引擎的**命令**），守卫的 `^\s*extern\s+` 因此不再命中。
+
+**调用点处理**：19 个符号用 `\b` 词边界做全局机械替换（`g_gain` → `g_appState.gain`，共 237 行），
+再由编译器验证。两个冒烟测试原本各自重复定义了一份 DSP 全局，现已删除——头文件统一提供。
+
+**守卫基线**：`extern` 30 → **0**（已收死）。`CMakeLists.txt` 为 voxmic 增加 `src` 到 include 路径，
+使共享头文件从 `src/dsp/` 下也能按同一方式解析。
+
+⚠️ **B3 只完成了解耦的一半**：状态已单一持有，但"UI 只发 `Command`、只收 `StateSnapshot`"
+这一层契约尚未建立。它要等 B5 的 Slint UI 一起做——在即将被替换的 1458 行 Win32 对话
+上先实现一遍是纯浪费。**该契约的落地位置改为 B5。**
 
 ### B2 实施细节
 

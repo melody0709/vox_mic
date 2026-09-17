@@ -8,21 +8,6 @@
 #include <cstdint>
 #include <string>
 
-std::atomic<float> g_gain{1.0f};
-std::atomic<bool> g_eqEnabled{false};
-std::atomic<float> g_eqPresence{0.0f};
-std::atomic<float> g_eqBassCut{0.0f};
-std::atomic<bool> g_compressorEnabled{false};
-std::atomic<bool> g_nrEnabled{true};
-std::atomic<float> g_nrStrength{0.6f};
-std::atomic<int> g_denoiseBackend{
-    static_cast<int>(DenoiseBackendKind::Dpdfnet)};
-std::atomic<uint64_t> g_denoiseResetEpoch{1};
-std::atomic<bool> g_dpdfnetAvailable{false};
-std::atomic<bool> g_dpdfnetDegraded{false};
-std::atomic<int> g_denoiseEffectiveBackend{
-    static_cast<int>(DenoiseBackendKind::Rnnoise)};
-
 static std::wstring utf8ToWide(const char* value) {
     if (!value || !*value) return {};
     const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
@@ -62,7 +47,7 @@ static bool runDpdfnetEpoch(DspPipeline& pipeline, int& block,
     int activeBlocks = 0;
     for (int i = 0; i < blocks; ++i, ++block) {
         if (!processOne(pipeline, block, sleepMs)) return false;
-        if (g_denoiseEffectiveBackend.load(std::memory_order_acquire) ==
+        if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) ==
             static_cast<int>(DenoiseBackendKind::Dpdfnet)) {
             ++activeBlocks;
         }
@@ -85,7 +70,7 @@ int main(int argc, char** argv) {
 
     DspPipeline pipeline;
     if (!pipeline.init(48000.0f, runtimeDirectory, modelPath) ||
-        !g_dpdfnetAvailable.load(std::memory_order_acquire)) {
+        !g_appState.dpdfnetAvailable.load(std::memory_order_acquire)) {
         std::printf("ERROR: DPDFNet pipeline initialization failed\n");
         return 1;
     }
@@ -96,19 +81,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    g_denoiseBackend.store(static_cast<int>(DenoiseBackendKind::Rnnoise),
+    g_appState.denoiseBackend.store(static_cast<int>(DenoiseBackendKind::Rnnoise),
         std::memory_order_release);
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
     if (!processOne(pipeline, block++, 0) ||
-        g_denoiseEffectiveBackend.load(std::memory_order_acquire) !=
+        g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) !=
             static_cast<int>(DenoiseBackendKind::Rnnoise)) {
         std::printf("ERROR: switch to RNNoise was not applied at a block boundary\n");
         return 1;
     }
 
-    g_denoiseBackend.store(static_cast<int>(DenoiseBackendKind::Dpdfnet),
+    g_appState.denoiseBackend.store(static_cast<int>(DenoiseBackendKind::Dpdfnet),
         std::memory_order_release);
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
     if (!runDpdfnetEpoch(pipeline, block, 70, 10, 55)) {
         std::printf("ERROR: DPDFNet did not recover after switching back\n");
         return 1;
@@ -117,7 +102,7 @@ int main(int argc, char** argv) {
     // Repeated resets exercise the epoch hand-off without allowing an old
     // worker FIFO to mute the first block of the next stream.
     for (int reset = 0; reset < 5; ++reset) {
-        g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+        g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
         if (!runDpdfnetEpoch(pipeline, block, 30, 10, 22)) {
             std::printf("ERROR: DPDFNet failed after repeated epoch reset #%d\n",
                 reset + 1);
@@ -128,16 +113,16 @@ int main(int argc, char** argv) {
     // Make the worker provably slower than the render cadence. The pipeline
     // must stop emitting unlimited silence and downgrade to RNNoise.
     pipeline.setDpdfnetWorkerDelayForTest(100);
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
     bool degraded = false;
     for (int i = 0; i < 12; ++i, ++block) {
         if (!processOne(pipeline, block, 0)) {
             std::printf("ERROR: watchdog test produced non-finite output\n");
             return 1;
         }
-        if (g_denoiseEffectiveBackend.load(std::memory_order_acquire) ==
+        if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) ==
                 static_cast<int>(DenoiseBackendKind::Rnnoise) &&
-            g_dpdfnetDegraded.load(std::memory_order_acquire)) {
+            g_appState.dpdfnetDegraded.load(std::memory_order_acquire)) {
             degraded = true;
             break;
         }
@@ -149,7 +134,7 @@ int main(int argc, char** argv) {
 
     pipeline.setDpdfnetWorkerDelayForTest(0);
     Sleep(150);
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
     if (!runDpdfnetEpoch(pipeline, block, 70, 10, 55)) {
         std::printf("ERROR: DPDFNet did not recover after watchdog reset\n");
         return 1;
@@ -157,17 +142,17 @@ int main(int argc, char** argv) {
 
     // Disabling NR must report an explicit Off effective state instead of
     // claiming that the selected backend is actively processing audio.
-    g_nrEnabled.store(false, std::memory_order_release);
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.nrEnabled.store(false, std::memory_order_release);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
     if (!processOne(pipeline, block++, 0) ||
-        g_denoiseEffectiveBackend.load(std::memory_order_acquire) !=
+        g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) !=
             static_cast<int>(DenoiseBackendKind::Off)) {
         std::printf("ERROR: disabled NR did not report effective backend Off\n");
         return 1;
     }
 
-    g_nrEnabled.store(true, std::memory_order_release);
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.nrEnabled.store(true, std::memory_order_release);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
     if (!runDpdfnetEpoch(pipeline, block, 70, 10, 55)) {
         std::printf("ERROR: DPDFNet did not recover after re-enabling NR\n");
         return 1;
@@ -182,9 +167,9 @@ int main(int argc, char** argv) {
             std::printf("ERROR: hard-failure test produced non-finite output\n");
             return 1;
         }
-        if (!g_dpdfnetAvailable.load(std::memory_order_acquire) &&
-            !g_dpdfnetDegraded.load(std::memory_order_acquire) &&
-            g_denoiseEffectiveBackend.load(std::memory_order_acquire) ==
+        if (!g_appState.dpdfnetAvailable.load(std::memory_order_acquire) &&
+            !g_appState.dpdfnetDegraded.load(std::memory_order_acquire) &&
+            g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) ==
                 static_cast<int>(DenoiseBackendKind::Rnnoise)) {
             hardFailed = true;
             break;

@@ -44,7 +44,11 @@ $LineBaselines = @{
 
 # Measured 2026-09-17. Ratchet: these may only go DOWN. Raising one requires
 # an explicit decision recorded in the commit message.
-$MaxExternTotal = 30      # extern decls in src/** minus src/dsp/rnnoise, minus extern "C"
+# Measured 0 after refactor step B3, which moved ~20 free globals into the
+# single inline g_appState (src/app_state.h) and dropped the redundant `extern`
+# keyword from the remaining function declarations. Ratchet: keep it at zero -
+# shared state belongs in AppState, not in per-TU extern declarations.
+$MaxExternTotal = 0       # extern decls in src/** minus src/dsp/rnnoise, minus extern "C"
 $MaxU8Literals  = 0       # C++20 char8_t conflict - must stay zero
 # 3 remaining sites: main.cpp:50 g_monitorThread, main.cpp:~622 bridge,
 # wasapi_output.h:68 m_renderThread. The fourth - dpdfnet_processor.cpp's

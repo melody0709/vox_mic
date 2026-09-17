@@ -12,27 +12,9 @@ extern "C" {
 #include "rnnoise.h"
 }
 
+#include "app_state.h"
 #include "dsp/biquad.h"
 #include "dsp/dpdfnet_processor.h"
-
-enum class DenoiseBackendKind : int {
-    Rnnoise = 0,
-    Dpdfnet = 1,
-    Off = 2,
-};
-
-extern std::atomic<float> g_gain;
-extern std::atomic<bool> g_eqEnabled;
-extern std::atomic<float> g_eqPresence;
-extern std::atomic<float> g_eqBassCut;
-extern std::atomic<bool> g_compressorEnabled;
-extern std::atomic<bool> g_nrEnabled;
-extern std::atomic<float> g_nrStrength;
-extern std::atomic<int> g_denoiseBackend;
-extern std::atomic<uint64_t> g_denoiseResetEpoch;
-extern std::atomic<bool> g_dpdfnetAvailable;
-extern std::atomic<bool> g_dpdfnetDegraded;
-extern std::atomic<int> g_denoiseEffectiveBackend;
 
 class DspPipeline {
 public:
@@ -57,8 +39,8 @@ public:
         std::string dpdfnetError;
         const bool dpdfnetReady = m_dpdfnet.prepare(runtimeDirectory, modelPath,
             static_cast<int>(sampleRate), 480, &dpdfnetError);
-        g_dpdfnetAvailable.store(dpdfnetReady, std::memory_order_release);
-        g_dpdfnetDegraded.store(false, std::memory_order_release);
+        g_appState.dpdfnetAvailable.store(dpdfnetReady, std::memory_order_release);
+        g_appState.dpdfnetDegraded.store(false, std::memory_order_release);
         if (!dpdfnetReady) {
             if (dpdfnetError.empty()) dpdfnetError = m_dpdfnet.prepareError();
             if (dpdfnetError.empty()) dpdfnetError = "unknown error";
@@ -67,13 +49,13 @@ public:
             printf("[DPDFNet] ready: 48 kHz / 480-sample online backend\n");
         }
 
-        m_rnnoiseStrength = g_nrStrength.load(std::memory_order_relaxed);
+        m_rnnoiseStrength = g_appState.nrStrength.load(std::memory_order_relaxed);
         rnnoise_set_strength(m_rnnoise, m_rnnoiseStrength);
-        m_nrActive = g_nrEnabled.load(std::memory_order_relaxed);
-        m_eqActive = g_eqEnabled.load(std::memory_order_relaxed);
-        m_lastPresence = g_eqPresence.load(std::memory_order_relaxed);
-        m_lastBassCut = g_eqBassCut.load(std::memory_order_relaxed);
-        m_compActive = g_compressorEnabled.load(std::memory_order_relaxed);
+        m_nrActive = g_appState.nrEnabled.load(std::memory_order_relaxed);
+        m_eqActive = g_appState.eqEnabled.load(std::memory_order_relaxed);
+        m_lastPresence = g_appState.eqPresence.load(std::memory_order_relaxed);
+        m_lastBassCut = g_appState.eqBassCut.load(std::memory_order_relaxed);
+        m_compActive = g_appState.compressorEnabled.load(std::memory_order_relaxed);
         configureEq();
         resetPostDenoiseState();
 
@@ -85,7 +67,7 @@ public:
             ? DenoiseBackendKind::Rnnoise
             : DenoiseBackendKind::Off;
         m_activeBackend = initialEffective;
-        g_denoiseEffectiveBackend.store(static_cast<int>(initialEffective),
+        g_appState.denoiseEffectiveBackend.store(static_cast<int>(initialEffective),
             std::memory_order_release);
         return true;
     }
@@ -96,10 +78,10 @@ public:
             return;
         }
 
-        const bool nrOn = g_nrEnabled.load(std::memory_order_relaxed);
-        const int requestedBackend = g_denoiseBackend.load(std::memory_order_relaxed);
-        const uint64_t globalEpoch = g_denoiseResetEpoch.load(std::memory_order_acquire);
-        const float nrStrength = g_nrStrength.load(std::memory_order_relaxed);
+        const bool nrOn = g_appState.nrEnabled.load(std::memory_order_relaxed);
+        const int requestedBackend = g_appState.denoiseBackend.load(std::memory_order_relaxed);
+        const uint64_t globalEpoch = g_appState.denoiseResetEpoch.load(std::memory_order_acquire);
+        const float nrStrength = g_appState.nrStrength.load(std::memory_order_relaxed);
 
         const bool settingsChanged =
             nrOn != m_nrActive ||
@@ -113,7 +95,7 @@ public:
             m_activeBackend = nrOn
                 ? chooseEffectiveBackend(requestedBackend)
                 : DenoiseBackendKind::Off;
-            g_denoiseEffectiveBackend.store(static_cast<int>(m_activeBackend),
+            g_appState.denoiseEffectiveBackend.store(static_cast<int>(m_activeBackend),
                 std::memory_order_release);
         }
 
@@ -122,10 +104,10 @@ public:
             if (m_rnnoise) rnnoise_set_strength(m_rnnoise, nrStrength);
         }
 
-        const bool eqOn = g_eqEnabled.load(std::memory_order_relaxed);
-        const bool compOn = g_compressorEnabled.load(std::memory_order_relaxed);
-        const float presence = g_eqPresence.load(std::memory_order_relaxed);
-        const float bassCut = g_eqBassCut.load(std::memory_order_relaxed);
+        const bool eqOn = g_appState.eqEnabled.load(std::memory_order_relaxed);
+        const bool compOn = g_appState.compressorEnabled.load(std::memory_order_relaxed);
+        const float presence = g_appState.eqPresence.load(std::memory_order_relaxed);
+        const float bassCut = g_appState.eqBassCut.load(std::memory_order_relaxed);
         if (eqOn != m_eqActive || presence != m_lastPresence ||
             bassCut != m_lastBassCut || compOn != m_compActive) {
             updateSettings(sampleRate);
@@ -221,7 +203,7 @@ private:
         m_dpdfnetSeenOutput = false;
         m_consecutiveDpdfnetUnderflows = 0;
         m_dpdfnetDegraded = false;
-        g_dpdfnetDegraded.store(false, std::memory_order_release);
+        g_appState.dpdfnetDegraded.store(false, std::memory_order_release);
     }
 
     void degradeDpdfnet(const char* reason) {
@@ -234,16 +216,16 @@ private:
             m_dpdfnet.setEpoch(m_streamEpoch);
         }
         if (!processorReady) {
-            g_dpdfnetAvailable.store(false, std::memory_order_release);
+            g_appState.dpdfnetAvailable.store(false, std::memory_order_release);
             // A failed session cannot be recreated on the render thread;
             // reserve degraded for a ready-but-stalled worker, and require a
             // fresh prepare (normally an application restart) for this case.
-            g_dpdfnetDegraded.store(false, std::memory_order_release);
+            g_appState.dpdfnetDegraded.store(false, std::memory_order_release);
         } else {
-            g_dpdfnetDegraded.store(true, std::memory_order_release);
+            g_appState.dpdfnetDegraded.store(true, std::memory_order_release);
         }
         m_activeBackend = DenoiseBackendKind::Rnnoise;
-        g_denoiseEffectiveBackend.store(
+        g_appState.denoiseEffectiveBackend.store(
             static_cast<int>(m_activeBackend), std::memory_order_release);
     }
 
@@ -261,10 +243,10 @@ private:
 
     void updateSettings(float sampleRate) {
         m_sampleRate = sampleRate;
-        m_eqActive = g_eqEnabled.load(std::memory_order_relaxed);
-        m_lastPresence = g_eqPresence.load(std::memory_order_relaxed);
-        m_lastBassCut = g_eqBassCut.load(std::memory_order_relaxed);
-        m_compActive = g_compressorEnabled.load(std::memory_order_relaxed);
+        m_eqActive = g_appState.eqEnabled.load(std::memory_order_relaxed);
+        m_lastPresence = g_appState.eqPresence.load(std::memory_order_relaxed);
+        m_lastBassCut = g_appState.eqBassCut.load(std::memory_order_relaxed);
+        m_compActive = g_appState.compressorEnabled.load(std::memory_order_relaxed);
         configureEq();
         if (m_compActive != m_lastConfiguredCompActive) {
             m_comp.rmsState = 0.0f;
@@ -299,8 +281,8 @@ private:
     }
 
     void processPostDenoise(float* samples, int numSamples) {
-        const bool eqOn = g_eqEnabled.load(std::memory_order_relaxed);
-        const bool compOn = g_compressorEnabled.load(std::memory_order_relaxed);
+        const bool eqOn = g_appState.eqEnabled.load(std::memory_order_relaxed);
+        const bool compOn = g_appState.compressorEnabled.load(std::memory_order_relaxed);
         if (eqOn) {
             for (int i = 0; i < numSamples; i++) {
                 float x = samples[i];

@@ -10,19 +10,7 @@
 #include <commctrl.h>
 #include <atomic>
 
-extern Config g_config;
-extern std::atomic<bool> g_running;
-extern std::atomic<bool> g_demandMode;
-extern std::atomic<bool> g_alwaysHot;
-extern std::atomic<bool> g_dpdfnetAvailable;
-extern std::atomic<bool> g_dpdfnetDegraded;
-extern std::atomic<bool> g_nrEnabled;
-extern std::atomic<int> g_denoiseBackend;
-extern std::atomic<int> g_denoiseEffectiveBackend;
-extern TrayIcon* g_trayIcon;
-extern void syncDspAtomsFromConfig(const Config& cfg);
-extern void requestDenoiseReset();
-extern void setDemandModeRuntime(bool enabled);
+#include "app_state.h"
 
 #define SETTINGS_CLASS "VoxMicSettingsClass"
 #define IDC_COMBO_DEVICE      2001
@@ -272,11 +260,11 @@ static void updateProcessingChainUi(HWND hWnd) {
     if (nrEnabled) {
         if (selectedBackend == 1) {
             const bool fallback =
-                g_dpdfnetDegraded.load(std::memory_order_acquire) ||
-                !g_dpdfnetAvailable.load(std::memory_order_acquire);
+                g_appState.dpdfnetDegraded.load(std::memory_order_acquire) ||
+                !g_appState.dpdfnetAvailable.load(std::memory_order_acquire);
             if (fallback) {
                 denoiseName = "RNNoise fallback";
-            } else if (g_denoiseEffectiveBackend.load(
+            } else if (g_appState.denoiseEffectiveBackend.load(
                            std::memory_order_acquire) == 1) {
                 denoiseName = "DPDFNet";
             } else {
@@ -314,17 +302,17 @@ static COLORREF denoiseStatusColor(HWND hWnd) {
         ? (int)SendMessageA(combo, CB_GETCURSEL, 0, 0)
         : 0;
     if (selection == 1) {
-        if (g_dpdfnetDegraded.load(std::memory_order_acquire) ||
-            !g_dpdfnetAvailable.load(std::memory_order_acquire)) {
+        if (g_appState.dpdfnetDegraded.load(std::memory_order_acquire) ||
+            !g_appState.dpdfnetAvailable.load(std::memory_order_acquire)) {
             return RGB(168, 104, 24);
         }
-        if (g_denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
+        if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
             return RGB(30, 120, 54);
         }
         return RGB(45, 92, 150);
     }
 
-    if (g_denoiseEffectiveBackend.load(std::memory_order_acquire) == 0) {
+    if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 0) {
         return RGB(30, 120, 54);
     }
     return RGB(45, 92, 150);
@@ -337,10 +325,10 @@ static void updateDenoiseBackendUi(HWND hWnd) {
 
     const int selection = (int)SendMessageA(combo, CB_GETCURSEL, 0, 0);
     const bool dpdfnetRequested = selection == 1;
-    const bool nrEnabled = g_nrEnabled.load(std::memory_order_acquire);
+    const bool nrEnabled = g_appState.nrEnabled.load(std::memory_order_acquire);
     updateDspControlStates(hWnd);
 
-    const int activeRequestedBackend = g_denoiseBackend.load(
+    const int activeRequestedBackend = g_appState.denoiseBackend.load(
         std::memory_order_acquire);
     const bool selectionIsApplied = activeRequestedBackend ==
         (dpdfnetRequested ? 1 : 0);
@@ -349,21 +337,21 @@ static void updateDenoiseBackendUi(HWND hWnd) {
         statusText = "Noise reduction is disabled; enable it to use the selected backend.";
     } else if (!dpdfnetRequested) {
         statusText = selectionIsApplied
-            ? (g_denoiseEffectiveBackend.load(std::memory_order_acquire) == 0
+            ? (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 0
                 ? "RNNoise is active."
                 : "RNNoise is selected; it will take effect at the next audio block.")
             : "RNNoise is selected; it will take effect at the next audio block.";
     } else if (!selectionIsApplied) {
-        statusText = g_dpdfnetAvailable.load(std::memory_order_acquire)
+        statusText = g_appState.dpdfnetAvailable.load(std::memory_order_acquire)
             ? "DPDFNet is ready; it will take effect at the next audio block."
             : "DPDFNet is unavailable; audio will use RNNoise fallback.";
-    } else if (g_dpdfnetDegraded.load(std::memory_order_acquire)) {
+    } else if (g_appState.dpdfnetDegraded.load(std::memory_order_acquire)) {
         statusText =
             "DPDFNet was degraded to RNNoise after a worker stall; it will retry after the next stream reset.";
-    } else if (!g_dpdfnetAvailable.load(std::memory_order_acquire)) {
+    } else if (!g_appState.dpdfnetAvailable.load(std::memory_order_acquire)) {
         statusText =
             "DPDFNet is unavailable; audio will use RNNoise until the runtime/model/session is available.";
-    } else if (g_denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
+    } else if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
         statusText = "DPDFNet is ready and selected.";
     } else {
         statusText = "DPDFNet is ready; it will take effect at the next audio block.";
@@ -579,8 +567,8 @@ static void applyDspPreviewFromUi(HWND hWnd) {
     Config preview = *pData->pConfig;
     saveDspUiToConfig(hWnd, &preview);
 
-    const bool oldNrEnabled = g_nrEnabled.load(std::memory_order_acquire);
-    const int oldBackend = g_denoiseBackend.load(std::memory_order_acquire);
+    const bool oldNrEnabled = g_appState.nrEnabled.load(std::memory_order_acquire);
+    const int oldBackend = g_appState.denoiseBackend.load(std::memory_order_acquire);
     syncDspAtomsFromConfig(preview);
 
     if (oldNrEnabled != preview.nrEnabled ||
@@ -597,8 +585,8 @@ static void restoreDspPreviewFromSnapshot(HWND hWnd) {
         hWnd, GWLP_USERDATA);
     if (!pData || !pData->hasEditBase) return;
 
-    const bool oldNrEnabled = g_nrEnabled.load(std::memory_order_acquire);
-    const int oldBackend = g_denoiseBackend.load(std::memory_order_acquire);
+    const bool oldNrEnabled = g_appState.nrEnabled.load(std::memory_order_acquire);
+    const int oldBackend = g_appState.denoiseBackend.load(std::memory_order_acquire);
     syncDspAtomsFromConfig(pData->editBaseConfig);
 
     if (oldNrEnabled != pData->editBaseConfig.nrEnabled ||
@@ -634,7 +622,7 @@ static bool commitSettings(HWND hWnd) {
     const std::string oldBackend = previous.denoiseBackend;
     const bool oldNrEnabled = previous.nrEnabled;
     const bool wasDpdfnetDegraded =
-        g_dpdfnetDegraded.load(std::memory_order_acquire);
+        g_appState.dpdfnetDegraded.load(std::memory_order_acquire);
 
     Config committed = previous;
     if (!saveUiToConfig(hWnd, &committed)) return false;
@@ -755,12 +743,12 @@ static bool saveStartupRegistrationControl(HWND hWnd) {
 }
 
 static void rollbackRuntimeConfigToggle(HWND hWnd, const Config& previous) {
-    g_config = previous;
+    g_appState.config = previous;
     setDemandModeRuntime(previous.demandMode);
-    g_alwaysHot.store(previous.alwaysHot, std::memory_order_relaxed);
-    if (g_trayIcon) {
-        g_trayIcon->setDemandMode(previous.demandMode);
-        g_trayIcon->setAlwaysHot(previous.alwaysHot);
+    g_appState.alwaysHot.store(previous.alwaysHot, std::memory_order_relaxed);
+    if (g_appState.trayIcon) {
+        g_appState.trayIcon->setDemandMode(previous.demandMode);
+        g_appState.trayIcon->setAlwaysHot(previous.alwaysHot);
     }
 
     const bool rolledBack = previous.save();
@@ -774,7 +762,7 @@ static void rollbackRuntimeConfigToggle(HWND hWnd, const Config& previous) {
 static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
 
-    if (g_trayIcon && g_trayIcon->handleWindowMessage(msg)) {
+    if (g_appState.trayIcon && g_appState.trayIcon->handleWindowMessage(msg)) {
         return 0;
     }
 
@@ -1162,7 +1150,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             ShowWindow(hWnd, SW_SHOW);
             SetForegroundWindow(hWnd);
         } else if (lParam == WM_RBUTTONUP || lParam == WM_CONTEXTMENU) {
-            if (g_trayIcon) g_trayIcon->showMenu(hWnd);
+            if (g_appState.trayIcon) g_appState.trayIcon->showMenu(hWnd);
         }
         return 0;
 
@@ -1344,12 +1332,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             break;
 
         case ID_MENU_DEMAND_MODE: {
-            const Config previous = g_config;
-            bool newVal = !g_demandMode.load();
+            const Config previous = g_appState.config;
+            bool newVal = !g_appState.demandMode.load();
             setDemandModeRuntime(newVal);
-            if (g_trayIcon) g_trayIcon->setDemandMode(newVal);
-            g_config.demandMode = newVal;
-            if (!g_config.save()) {
+            if (g_appState.trayIcon) g_appState.trayIcon->setDemandMode(newVal);
+            g_appState.config.demandMode = newVal;
+            if (!g_appState.config.save()) {
                 rollbackRuntimeConfigToggle(hWnd, previous);
                 break;
             }
@@ -1361,12 +1349,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             break;
         }
         case ID_MENU_ALWAYS_HOT: {
-            const Config previous = g_config;
-            bool newVal = !g_alwaysHot.load();
-            g_alwaysHot.store(newVal);
-            if (g_trayIcon) g_trayIcon->setAlwaysHot(newVal);
-            g_config.alwaysHot = newVal;
-            if (!g_config.save()) {
+            const Config previous = g_appState.config;
+            bool newVal = !g_appState.alwaysHot.load();
+            g_appState.alwaysHot.store(newVal);
+            if (g_appState.trayIcon) g_appState.trayIcon->setAlwaysHot(newVal);
+            g_appState.config.alwaysHot = newVal;
+            if (!g_appState.config.save()) {
                 rollbackRuntimeConfigToggle(hWnd, previous);
                 break;
             }
@@ -1382,8 +1370,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             SetForegroundWindow(hWnd);
             break;
         case ID_MENU_EXIT:
-            if (g_trayIcon) g_trayIcon->destroy();
-            g_running.store(false);
+            if (g_appState.trayIcon) g_appState.trayIcon->destroy();
+            g_appState.running.store(false);
             PostQuitMessage(0);
             break;
         }

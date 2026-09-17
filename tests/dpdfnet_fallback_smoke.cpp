@@ -7,20 +7,6 @@
 #include <cstdio>
 #include <string>
 
-std::atomic<float> g_gain{1.0f};
-std::atomic<bool> g_eqEnabled{false};
-std::atomic<float> g_eqPresence{0.0f};
-std::atomic<float> g_eqBassCut{0.0f};
-std::atomic<bool> g_compressorEnabled{false};
-std::atomic<bool> g_nrEnabled{true};
-std::atomic<float> g_nrStrength{0.6f};
-std::atomic<int> g_denoiseBackend{
-    static_cast<int>(DenoiseBackendKind::Dpdfnet)};
-std::atomic<uint64_t> g_denoiseResetEpoch{1};
-std::atomic<bool> g_dpdfnetAvailable{false};
-std::atomic<bool> g_dpdfnetDegraded{false};
-std::atomic<int> g_denoiseEffectiveBackend{
-    static_cast<int>(DenoiseBackendKind::Rnnoise)};
 
 static std::wstring utf8ToWide(const char* value) {
     if (!value || !*value) return {};
@@ -62,9 +48,9 @@ int main(int argc, char** argv) {
     }
     pipeline.process(samples, 480, 48000.0f);
 
-    const int effective = g_denoiseEffectiveBackend.load(
+    const int effective = g_appState.denoiseEffectiveBackend.load(
         std::memory_order_acquire);
-    if (g_dpdfnetAvailable.load(std::memory_order_acquire) ||
+    if (g_appState.dpdfnetAvailable.load(std::memory_order_acquire) ||
         effective != static_cast<int>(DenoiseBackendKind::Rnnoise)) {
         std::printf("ERROR: missing DPDFNet resources did not fall back to RNNoise\n");
         return 1;

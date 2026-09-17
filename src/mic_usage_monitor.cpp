@@ -8,9 +8,7 @@
 
 #pragma comment(lib, "ole32.lib")
 
-extern std::atomic<bool> g_micRequested;
-extern std::atomic<bool> g_demandMode;
-extern std::atomic<uint64_t> g_micOnTick;
+#include "app_state.h"
 
 namespace {
 
@@ -272,13 +270,13 @@ void MicUsageMonitor::syncSessionMetricsLocked() {
 }
 
 void MicUsageMonitor::setMicRequestedLocked(bool requested, const char* reason) {
-    const bool previous = g_micRequested.exchange(requested, std::memory_order_acq_rel);
+    const bool previous = g_appState.micRequested.exchange(requested, std::memory_order_acq_rel);
     if (previous == requested) return;
 
     if (requested) {
-        g_micOnTick.store(GetTickCount64(), std::memory_order_release);
+        g_appState.micOnTick.store(GetTickCount64(), std::memory_order_release);
     } else {
-        g_micOnTick.store(0, std::memory_order_release);
+        g_appState.micOnTick.store(0, std::memory_order_release);
     }
 
     printf("[Demand] requested=%d reason=%s active=%zu tracked=%zu corrections=%llu\n",
@@ -290,7 +288,7 @@ void MicUsageMonitor::setMicRequestedLocked(bool requested, const char* reason) 
 }
 
 void MicUsageMonitor::evaluateRequestedStateLocked(const char* reason) {
-    if (!g_demandMode.load(std::memory_order_acquire)) {
+    if (!g_appState.demandMode.load(std::memory_order_acquire)) {
         m_inactiveDeadlineTick = 0;
         setMicRequestedLocked(true, "demand-disabled");
         return;
@@ -302,7 +300,7 @@ void MicUsageMonitor::evaluateRequestedStateLocked(const char* reason) {
         return;
     }
 
-    if (!g_micRequested.load(std::memory_order_acquire)) {
+    if (!g_appState.micRequested.load(std::memory_order_acquire)) {
         m_inactiveDeadlineTick = 0;
         return;
     }

@@ -22,7 +22,7 @@ public:
     static constexpr int RECV_ERROR = -2;
 
     // How long a single recv may block. Also the upper bound on how long
-    // shutdown can wait for the bridge thread to notice g_running going false.
+    // shutdown can wait for the bridge thread to notice g_appState.running going false.
     static constexpr int RECV_TIMEOUT_MS = 500;
 
     bool init();

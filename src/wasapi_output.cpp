@@ -10,8 +10,7 @@
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "mmdevapi.lib")
 
-extern std::atomic<bool> g_micRequested;
-extern std::atomic<bool> g_demandMode;
+#include "app_state.h"
 
 WASAPIOutput::WASAPIOutput() {}
 
@@ -190,7 +189,7 @@ void WASAPIOutput::renderThread() {
         }
         renderStallScore.store(0, std::memory_order_relaxed);
 
-        float gain = g_gain.load(std::memory_order_relaxed);
+        float gain = g_appState.gain.load(std::memory_order_relaxed);
 
         UINT32 padding = 0;
         hr = m_pAudioClient->GetCurrentPadding(&padding);
@@ -250,8 +249,8 @@ void WASAPIOutput::renderThread() {
                 }
             } else {
                 memset(pData, 0, outBlockSize);
-                bool expectAudio = !g_demandMode.load(std::memory_order_relaxed) ||
-                                   g_micRequested.load(std::memory_order_relaxed);
+                bool expectAudio = !g_appState.demandMode.load(std::memory_order_relaxed) ||
+                                   g_appState.micRequested.load(std::memory_order_relaxed);
                 if (expectAudio) {
                     underruns.fetch_add(1, std::memory_order_relaxed);
                 } else {

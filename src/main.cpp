@@ -23,37 +23,20 @@
 #define ADB_LOST_RETRY_MAX_MS 3000
 #define ADB_LOST_LOG_MS 30000
 
-Config g_config;
-std::atomic<bool> g_running{true};
+// Shared cross-thread state now lives in g_appState (src/app_state.h), so only
+// the main.cpp-local plumbing is defined here.
 static std::atomic<bool> g_streaming{false};
-std::atomic<float> g_gain{1.5f};
-std::atomic<bool> g_eqEnabled{false};
-std::atomic<float> g_eqPresence{3.0f};
-std::atomic<float> g_eqBassCut{-3.0f};
-std::atomic<bool> g_compressorEnabled{false};
-std::atomic<bool> g_nrEnabled{true};
-std::atomic<float> g_nrStrength{0.6f};
-std::atomic<int> g_denoiseBackend{static_cast<int>(DenoiseBackendKind::Dpdfnet)};
-std::atomic<uint64_t> g_denoiseResetEpoch{1};
-std::atomic<bool> g_dpdfnetAvailable{false};
-std::atomic<bool> g_dpdfnetDegraded{false};
-std::atomic<int> g_denoiseEffectiveBackend{static_cast<int>(DenoiseBackendKind::Rnnoise)};
-std::atomic<bool> g_micRequested{false};
 static std::atomic<bool> g_micStreaming{false};
-std::atomic<bool> g_demandMode{true};
-std::atomic<bool> g_alwaysHot{true};
-std::atomic<uint64_t> g_micOnTick{0};
 static std::atomic<uint64_t> g_sourceBlocksReceived{0};
 static std::atomic<uint64_t> g_sourceBlocksDiscarded{0};
 static std::atomic<uint64_t> g_sourceBlocksPushed{0};
 static MicUsageMonitor g_micMonitor;
 static std::thread g_monitorThread;
 static WASAPIOutput* g_wasapiOutput{nullptr};
-TrayIcon* g_trayIcon{nullptr};
 static HINSTANCE g_hInstance{nullptr};
 
 void setDemandModeRuntime(bool enabled) {
-    g_demandMode.store(enabled, std::memory_order_release);
+    g_appState.demandMode.store(enabled, std::memory_order_release);
     g_micMonitor.onDemandModeChanged();
 }
 
@@ -88,25 +71,25 @@ static const char* bridgeStatusName(int status) {
 }
 
 void syncDspAtomsFromConfig(const Config& cfg) {
-    g_gain.store(cfg.gain, std::memory_order_relaxed);
-    g_eqEnabled.store(cfg.eqEnabled, std::memory_order_relaxed);
-    g_eqPresence.store(cfg.eqPresence, std::memory_order_relaxed);
-    g_eqBassCut.store(cfg.eqBassCut, std::memory_order_relaxed);
-    g_compressorEnabled.store(cfg.compressorEnabled, std::memory_order_relaxed);
-    g_nrEnabled.store(cfg.nrEnabled, std::memory_order_relaxed);
-    g_nrStrength.store(cfg.nrStrength, std::memory_order_relaxed);
+    g_appState.gain.store(cfg.gain, std::memory_order_relaxed);
+    g_appState.eqEnabled.store(cfg.eqEnabled, std::memory_order_relaxed);
+    g_appState.eqPresence.store(cfg.eqPresence, std::memory_order_relaxed);
+    g_appState.eqBassCut.store(cfg.eqBassCut, std::memory_order_relaxed);
+    g_appState.compressorEnabled.store(cfg.compressorEnabled, std::memory_order_relaxed);
+    g_appState.nrEnabled.store(cfg.nrEnabled, std::memory_order_relaxed);
+    g_appState.nrStrength.store(cfg.nrStrength, std::memory_order_relaxed);
     const int backend = (_stricmp(cfg.denoiseBackend.c_str(), "dpdfnet") == 0)
         ? static_cast<int>(DenoiseBackendKind::Dpdfnet)
         : static_cast<int>(DenoiseBackendKind::Rnnoise);
-    g_denoiseBackend.store(backend, std::memory_order_release);
+    g_appState.denoiseBackend.store(backend, std::memory_order_release);
 }
 
 void syncDspAtomsFromConfig() {
-    syncDspAtomsFromConfig(g_config);
+    syncDspAtomsFromConfig(g_appState.config);
 }
 
 void requestDenoiseReset() {
-    g_denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
+    g_appState.denoiseResetEpoch.fetch_add(1, std::memory_order_acq_rel);
 }
 
 static void setConsoleVisible(bool visible) {
@@ -125,7 +108,7 @@ static void setConsoleVisible(bool visible) {
 
 VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     if (!g_wasapiOutput) return;
-    const int effectiveBackend = g_denoiseEffectiveBackend.load(
+    const int effectiveBackend = g_appState.denoiseEffectiveBackend.load(
         std::memory_order_relaxed);
     const char* denoiseName = "rnnoise";
     if (effectiveBackend == static_cast<int>(DenoiseBackendKind::Dpdfnet)) {
@@ -135,7 +118,7 @@ VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
     }
     printf("[Stats] state=%s request=%d sessions=%d/%d corrections=%llu source(recv=%llu idleDrop=%llu push=%llu) render(recv=%d drop=%d underrun=%d idleSilence=%d queue=%zu) proc=%.0fus lat=%.1fms denoise=%s dpdf(avail=%d degraded=%d uf=%llu inDrop=%llu outDrop=%llu worker=%.0fus)\n",
         bridgeStatusName(g_bridgeStatus.load(std::memory_order_relaxed)),
-        g_micRequested.load(std::memory_order_relaxed) ? 1 : 0,
+        g_appState.micRequested.load(std::memory_order_relaxed) ? 1 : 0,
         g_micMonitor.activeSessionCount(),
         g_micMonitor.trackedSessionCount(),
         static_cast<unsigned long long>(g_micMonitor.reconciliationCorrections()),
@@ -153,8 +136,8 @@ VOID CALLBACK statsTimerProc(HWND, UINT, UINT_PTR, DWORD) {
         g_wasapiOutput->procUsEma.load(),
         g_wasapiOutput->estLatencyMs.load(),
         denoiseName,
-        g_dpdfnetAvailable.load(std::memory_order_relaxed) ? 1 : 0,
-        g_dpdfnetDegraded.load(std::memory_order_relaxed) ? 1 : 0,
+        g_appState.dpdfnetAvailable.load(std::memory_order_relaxed) ? 1 : 0,
+        g_appState.dpdfnetDegraded.load(std::memory_order_relaxed) ? 1 : 0,
         static_cast<unsigned long long>(g_wasapiOutput->dpdfnetUnderflows()),
         static_cast<unsigned long long>(g_wasapiOutput->dpdfnetInputDrops()),
         static_cast<unsigned long long>(g_wasapiOutput->dpdfnetOutputDrops()),
@@ -167,15 +150,15 @@ void micMonitorThread() {
         // Fail open: a monitor failure must not turn the microphone into
         // permanent digital silence. Demand Mode temporarily behaves as an
         // always-stream gate until the application is restarted.
-        g_micRequested.store(true, std::memory_order_release);
-        g_micOnTick.store(GetTickCount64(), std::memory_order_release);
+        g_appState.micRequested.store(true, std::memory_order_release);
+        g_appState.micOnTick.store(GetTickCount64(), std::memory_order_release);
         printf("MicUsageMonitor: unavailable, failing open to continuous audio\n");
         fflush(stdout);
-        while (g_running.load(std::memory_order_relaxed)) Sleep(200);
+        while (g_appState.running.load(std::memory_order_relaxed)) Sleep(200);
         return;
     }
 
-    while (g_running.load(std::memory_order_relaxed)) {
+    while (g_appState.running.load(std::memory_order_relaxed)) {
         // Events discover sessions and provide the fast state path. The
         // periodic pass refreshes already tracked states and applies debounce.
         g_micMonitor.reconcile();
@@ -193,20 +176,20 @@ void audioBridgeThread() {
         return;
     }
 
-    std::string serial = g_config.serial;
-    std::string host = g_config.host;
-    int port = g_config.port;
-    std::string androidComponent = g_config.androidComponent;
-    std::string androidSocket = g_config.androidSocket;
+    std::string serial = g_appState.config.serial;
+    std::string host = g_appState.config.host;
+    int port = g_appState.config.port;
+    std::string androidComponent = g_appState.config.androidComponent;
+    std::string androidSocket = g_appState.config.androidSocket;
     std::string remoteSocket = "localabstract:" + androidSocket;
-    bool ns = g_config.nsEnabled;
-    bool aec = g_config.aecEnabled;
-    bool agc = g_config.agcEnabled;
+    bool ns = g_appState.config.nsEnabled;
+    bool aec = g_appState.config.aecEnabled;
+    bool agc = g_appState.config.agcEnabled;
     syncDspAtomsFromConfig();
 
-    if (!g_running.load()) return;
+    if (!g_appState.running.load()) return;
 
-    while (g_running.load()) {
+    while (g_appState.running.load()) {
         if (!adb.init(serial)) {
             Sleep(2000);
             continue;
@@ -218,16 +201,16 @@ void audioBridgeThread() {
         break;
     }
 
-    if (!g_running.load()) { adb.cleanup(port); return; }
+    if (!g_appState.running.load()) { adb.cleanup(port); return; }
     printf("ADB ready, entering Always Hot mode\n");
     printf("Settings:\n");
-    printf("  Gain = %.2fx\n", g_config.gain);
+    printf("  Gain = %.2fx\n", g_appState.config.gain);
     printf("  Android HW: NS=%d AEC=%d AGC=%d\n", ns, aec, agc);
     printf("  DSP: NR=%d backend=%s EQ=%d (Presence=+%.1fdB BassCut=%.1fdB) Compressor=%d\n",
-           g_config.nrEnabled, g_config.denoiseBackend.c_str(),
-           g_config.eqEnabled,
-           g_config.eqPresence, g_config.eqBassCut,
-           g_config.compressorEnabled);
+           g_appState.config.nrEnabled, g_appState.config.denoiseBackend.c_str(),
+           g_appState.config.eqEnabled,
+           g_appState.config.eqPresence, g_appState.config.eqBassCut,
+           g_appState.config.compressorEnabled);
     fflush(stdout);
     g_bridgeStatus.store(BRIDGE_IDLE_SLEEP, std::memory_order_relaxed);
 
@@ -256,7 +239,7 @@ void audioBridgeThread() {
         requestDenoiseReset();
         g_streaming.store(false);
         g_micStreaming.store(false);
-        if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+        if (g_appState.trayIcon) g_appState.trayIcon->updateIcon(false, false);
     };
 
     auto recoverAdb = [&](const char* reason) -> bool {
@@ -313,16 +296,16 @@ void audioBridgeThread() {
         }
     };
 
-    while (g_running.load()) {
+    while (g_appState.running.load()) {
         if (recoveryState == BridgeRecoveryState::AdbLost) {
             pollAdbLost();
             Sleep(200);
             continue;
         }
 
-        if (!g_alwaysHot.load(std::memory_order_relaxed) &&
-            g_demandMode.load(std::memory_order_relaxed) &&
-            !g_micRequested.load(std::memory_order_relaxed)) {
+        if (!g_appState.alwaysHot.load(std::memory_order_relaxed) &&
+            g_appState.demandMode.load(std::memory_order_relaxed) &&
+            !g_appState.micRequested.load(std::memory_order_relaxed)) {
             g_bridgeStatus.store(BRIDGE_IDLE_SLEEP, std::memory_order_relaxed);
             uint64_t now = GetTickCount64();
             if (adbReadyOnce && now >= nextIdleHealthTick) {
@@ -381,9 +364,9 @@ void audioBridgeThread() {
             requestDenoiseReset();
             g_streaming.store(true);
             g_micStreaming.store(true);
-            if (g_trayIcon) {
-                bool dm = g_demandMode.load(std::memory_order_relaxed);
-                g_trayIcon->updateIcon(!dm, true);
+            if (g_appState.trayIcon) {
+                bool dm = g_appState.demandMode.load(std::memory_order_relaxed);
+                g_appState.trayIcon->updateIcon(!dm, true);
             }
         }
 
@@ -392,7 +375,7 @@ void audioBridgeThread() {
         int staleCount = 0;
         bool wasIdle = true;
 
-        while (g_running.load()) {
+        while (g_appState.running.load()) {
             if (!socketClient.isConnected()) break;
 
             if (!socketClient.waitForData(100)) {
@@ -404,7 +387,7 @@ void audioBridgeThread() {
                     requestDenoiseReset();
                     g_streaming.store(false);
                     g_micStreaming.store(false);
-                    if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+                    if (g_appState.trayIcon) g_appState.trayIcon->updateIcon(false, false);
                     break;
                 }
                 continue;
@@ -424,13 +407,13 @@ void audioBridgeThread() {
                 requestDenoiseReset();
                 g_streaming.store(false);
                 g_micStreaming.store(false);
-                if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+                if (g_appState.trayIcon) g_appState.trayIcon->updateIcon(false, false);
                 break;
             }
             g_sourceBlocksReceived.fetch_add(1, std::memory_order_relaxed);
 
-            bool micRequested = g_micRequested.load(std::memory_order_relaxed);
-            bool demandOff = !g_demandMode.load(std::memory_order_relaxed);
+            bool micRequested = g_appState.micRequested.load(std::memory_order_relaxed);
+            bool demandOff = !g_appState.demandMode.load(std::memory_order_relaxed);
             bool renderStalled = g_wasapiOutput && g_wasapiOutput->renderStallScore.load(std::memory_order_relaxed) >= 3;
             bool effectiveActive = demandOff || (micRequested && !renderStalled);
 
@@ -439,19 +422,19 @@ void audioBridgeThread() {
                 if (!wasIdle) requestDenoiseReset();
                 g_micStreaming.store(false);
                 g_bridgeStatus.store(BRIDGE_IDLE_HOT, std::memory_order_relaxed);
-                if (g_trayIcon && !wasIdle) g_trayIcon->updateIcon(false, true);
+                if (g_appState.trayIcon && !wasIdle) g_appState.trayIcon->updateIcon(false, true);
                 idleCount++;
                 wasIdle = true;
                 if (idleCount % 50 == 0) {
                     g_wasapiOutput->getRingBuffer()->reset();
                 }
-                if (!g_alwaysHot.load(std::memory_order_relaxed) && idleCount > 500) {
+                if (!g_appState.alwaysHot.load(std::memory_order_relaxed) && idleCount > 500) {
                     printf("Idle 5s, disconnecting socket\n");
                     fflush(stdout);
                     socketClient.disconnect();
                     g_streaming.store(false);
                     g_micStreaming.store(false);
-                    if (g_trayIcon) g_trayIcon->updateIcon(false, false);
+                    if (g_appState.trayIcon) g_appState.trayIcon->updateIcon(false, false);
                     break;
                 }
                 continue;
@@ -460,11 +443,11 @@ void audioBridgeThread() {
             idleCount = 0;
             g_micStreaming.store(true);
             g_bridgeStatus.store(BRIDGE_STREAMING, std::memory_order_relaxed);
-            if (g_trayIcon && wasIdle) g_trayIcon->updateIcon(true, true);
+            if (g_appState.trayIcon && wasIdle) g_appState.trayIcon->updateIcon(true, true);
 
             if (wasIdle) {
                 requestDenoiseReset();
-                uint64_t t = g_micOnTick.exchange(0, std::memory_order_acq_rel);
+                uint64_t t = g_appState.micOnTick.exchange(0, std::memory_order_acq_rel);
                 if (t) {
                     uint64_t now = GetTickCount64();
                     printf("[DetectLatency] %llums\n", (unsigned long long)(now - t));
@@ -495,8 +478,8 @@ void audioBridgeThread() {
         requestDenoiseReset();
         g_streaming.store(false);
         g_micStreaming.store(false);
-        if (g_trayIcon) {
-            g_trayIcon->updateIcon(false, false);
+        if (g_appState.trayIcon) {
+            g_appState.trayIcon->updateIcon(false, false);
         }
         printf("[Bridge] inner loop exited, will retry outer loop\n");
         fflush(stdout);
@@ -545,16 +528,16 @@ int main(int argc, char* argv[]) {
     }
 
     runtime_paths::MigrateLegacyConfigIfNeeded();
-    g_config = Config::load();
+    g_appState.config = Config::load();
     syncDspAtomsFromConfig();
-    g_demandMode.store(g_config.demandMode, std::memory_order_relaxed);
-    g_alwaysHot.store(g_config.alwaysHot, std::memory_order_relaxed);
+    g_appState.demandMode.store(g_appState.config.demandMode, std::memory_order_relaxed);
+    g_appState.alwaysHot.store(g_appState.config.alwaysHot, std::memory_order_relaxed);
 
     bool listDevices = false;
     bool showHelp = false;
-    std::string host = g_config.host;
-    int port = g_config.port;
-    std::string serial = g_config.serial;
+    std::string host = g_appState.config.host;
+    int port = g_appState.config.port;
+    std::string serial = g_appState.config.serial;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -571,7 +554,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (showHelp || listDevices || g_config.debugConsole) {
+    if (showHelp || listDevices || g_appState.config.debugConsole) {
         setConsoleVisible(true);
     }
 
@@ -606,17 +589,17 @@ int main(int argc, char* argv[]) {
     HINSTANCE hInstance = GetModuleHandle(NULL);
     g_hInstance = hInstance;
 
-    HWND hWnd = createSettingsWindow(hInstance, &g_config);
+    HWND hWnd = createSettingsWindow(hInstance, &g_appState.config);
     if (!hWnd) {
         printf("ERROR: Failed to create settings window\n");
         return 1;
     }
 
     TrayIcon trayIcon;
-    g_trayIcon = &trayIcon;
+    g_appState.trayIcon = &trayIcon;
     trayIcon.create(hInstance, hWnd);
-    trayIcon.setDemandMode(g_config.demandMode);
-    trayIcon.setAlwaysHot(g_config.alwaysHot);
+    trayIcon.setDemandMode(g_appState.config.demandMode);
+    trayIcon.setAlwaysHot(g_appState.config.alwaysHot);
 
     SetTimer(hWnd, 1, STATS_INTERVAL_MS, statsTimerProc);
 
@@ -639,7 +622,7 @@ int main(int argc, char* argv[]) {
     printf("\nShutting down...\n");
     fflush(stdout);
 
-    g_running.store(false);
+    g_appState.running.store(false);
     if (bridge.joinable()) bridge.join();
     if (g_monitorThread.joinable()) g_monitorThread.join();
     wasapiOutput.stop();

@@ -95,7 +95,9 @@ add_executable(voxmic WIN32
     src/voxmic.rc
 )
 
-target_include_directories(voxmic PRIVATE src/dsp/rnnoise)
+# `src` on the include path so shared headers (app_state.h) resolve the same way
+# from every translation unit, including the ones under src/dsp/.
+target_include_directories(voxmic PRIVATE src src/dsp/rnnoise)
 
 if(VOXMIC_ENABLE_DPDFNET)
     target_include_directories(voxmic PRIVATE "${VOXMIC_DPDFNET_INCLUDE_DIR}")
