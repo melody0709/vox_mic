@@ -42,6 +42,40 @@ A guardrail violation fails the build fast rather than after a full compile.
 - .NET SDK + WiX v4 SDK via NuGet (MSI; no machine-level WiX install needed)
 - Android: SDK `D:\@APP\android-platform-sdk\android-sdk`, Gradle 8.7, JDK 17
 
+## Slint C++ SDK (prerequisite for the planned UI refactor)
+
+Not wired into `CMakeLists.txt` yet. This records where the SDK lives so the
+integration step has nothing to rediscover.
+
+- Slint 1.17.1 (win64 MSVC AMD64) is installed at
+  `%USERPROFILE%\.workbuddy\binaries\slint\1.17.1\cpp-sdk`.
+- The user-level `CMAKE_PREFIX_PATH` points at that directory, so
+  `find_package(Slint)` resolves with no extra flags.
+- The official package is an NSIS installer. Extract it with 7-Zip instead of
+  running it, which leaves the machine untouched:
+
+  ```cmd
+  7z x Slint-cpp-1.17.1-win64-MSVC-AMD64.exe -o<target-dir>
+  ```
+
+- Package integrity record:
+  `sha256 f5b537da448c1e3d72a24a774e19518ae412b9706b8ef49bdee64b62b878fe56`.
+- Link target is `Slint::Slint`. It requires C++20 (this project targets C++23)
+  and MSVC gets `/bigobj` added automatically. `.slint` files are registered with
+  `slint_target_sources()`.
+- Runtime, important: the prebuilt package ships **only** a shared library.
+  `slint_cpp.dll` (26.3 MB) has to be deployed next to the executable — the
+  existing package has no static library, so static linking is not an option
+  short of building Slint from source with Rust.
+- `.slint` sources belong in the **repository-root** `ui/` directory. The
+  architecture guard only scans that path, and it fails the build as soon as a
+  `.slint` file exists without an `AboutSlint` widget, because the royalty-free
+  licence tier requires visible disclosure.
+
+Verified end to end with a throwaway CMake project (MSVC 14.44 + Ninja + C++23):
+configure, compile, link and run all succeed; omitting `slint_cpp.dll` makes the
+executable exit with `0xC0000135` (STATUS_DLL_NOT_FOUND).
+
 ## DPDFNet Payload (Git LFS)
 
 The DPDFNet payload is enabled by default and vendored under `third_party/dpdfnet/`;
