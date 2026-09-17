@@ -200,7 +200,7 @@ Slint 增量（2026-09-17 实测，预编译包 1.17.1 win64-MSVC-AMD64）：
 
 | 项 | 结论 |
 |---|---|
-| 版本 | **1.17.1**（与参考项目 `stock_new` 对齐） |
+| 版本 | **1.17.1**（已按此版本安装 `cpp-sdk` 并完成编译运行实测，见本表下方实测记录） |
 | C++ SDK | 官方预编译包 `Slint-cpp-1.17.1-win64-MSVC-AMD64.exe`（NSIS 安装器，可直接用 7-Zip 解包，无需运行安装器） |
 | **安装位置** | `~/.workbuddy/binaries/slint/1.17.1/cpp-sdk/`（与既有 `bin/`、`lsp/`、`viewer/` 同级），实测 37 MB |
 | **环境变量** | 用户级 `CMAKE_PREFIX_PATH` = `C:\Users\kawae\.workbuddy\binaries\slint\1.17.1\cpp-sdk`（原为空，已设） |
@@ -210,9 +210,9 @@ Slint 增量（2026-09-17 实测，预编译包 1.17.1 win64-MSVC-AMD64）：
 | 编译器要求 | `Slint::Slint` 声明 `INTERFACE_COMPILE_FEATURES cxx_std_20`；本项目定 C++23，满足。MSVC 会自动加 `/bigobj` |
 | 运行时 | **必须随包带 `slint_cpp.dll`** —— 该预编译包**只提供共享库**（`lib/slint_cpp.dll` + `lib/slint_cpp.dll.lib`），**无静态库**，静态链接不可行。exe 找不到该 DLL 会以 `0xC0000135` 直接退出（已实测） |
 | 构建期依赖 | `bin/slint-compiler.exe`（由 SDK 自带，`SlintConfig.cmake` 默认走本地副本，**不联网下载**） |
-| 默认控件风格 | `SLINT_STYLE` 默认为 `fluent`；如需与参考项目视觉一致，需显式覆写并落进 `ui/theme.slint` |
+| 默认控件风格 | `SLINT_STYLE` 默认为 `fluent`。**其自带配色与 §附 的设计规范不一致**：需覆写风格 token 或自绘控件，最终统一落进 `ui/theme.slint` |
 | 托盘 | 现有 `tray_icon.cpp` 仅 **119 行**且工作正常，**保持不动**；Slint `SystemTrayIcon` 列为可选 |
-| 设计 token | 从参考项目 `ui/main.slint` 抄色值 / 圆角 / 字号 / 间距，落成 `ui/theme.slint` 的 `global` |
+| 设计 token | **不继承任何外部项目**。按 §附 的视觉设计规范自行设计，落成 `ui/theme.slint` 的 `global` |
 | **许可文件** | SDK 自带 `licenses/LICENSE.md` + `THIRDPARTY.md`，随包保留 |
 
 **实测记录（2026-09-17）**：用与本项目一致的 MSVC 14.44.35207 x64 + Ninja + C++23 构建了一个最小
@@ -258,7 +258,7 @@ BUILD_EXIT=0        slint-compiler 生成 slint_generated_app_1.cpp → main.cpp
 | **B2** | **§2 两个挂死点**（另开提交）：socket 设 `SO_RCVTIMEO`；DPDFNet worker 改 `jthread` + 超时放弃 | 退出不再挂死 |
 | B3 | 解耦：抽出 `Command` / `StateSnapshot` 通道，UI 不再 `extern` 全局 | `settings_dialog.cpp` 无 `extern` atomic |
 | B4 | 接入 Slint：`find_package(Slint)` 打通 + 空窗口跑起来，**同一步放入 `AboutSlint`** | 构建并显示出 Slint 窗口，且守卫通过 |
-| B5 | 迁设计 token 到 `ui/theme.slint`；逐项迁移 20 个配置项 | 功能对齐现有配置项 |
+| B5 | 按 §附 的视觉设计规范落成 `ui/theme.slint`；逐项迁移 20 个配置项 | 功能对齐现有配置项 |
 | B6 | 按需创建/销毁验证（§4.3）：托盘常驻时不加载 UI | 常驻内存与改造前持平 |
 | B7 | 打包：**随包带 `slint_cpp.dll`**（静态链接不可行，见 §7），`validate_build_layout.ps1` 白名单适配 | 装得上、卸载干净 |
 
@@ -365,16 +365,67 @@ BUILD_EXIT=0        slint-compiler 生成 slint_generated_app_1.cpp → main.cpp
 
 ---
 
-## 附：参考项目可复用资产 `[已核实]`
+## 附：视觉设计规范（自行设计，不继承参考项目）
 
-参考项目 `D:\GITHUB_melody0709\stock_new` 的 `ui/main.slint`（111KB，纯手写设计 token）。
-**`.slint` 是语言无关的界面描述**，可直接复用于 C++ 项目，故以下视觉规范照抄：
+**已否决：不继承参考项目 `stock_new` 的视觉规范**（2026-09-17 决定）。
 
-- 窗口底 `#0b1220` · 面板 `#111b2e` · 嵌套区 `#0f172a` · 描边 `#26334a`
-- 主色 `#3b82f6`（hover `#2563eb` / 选中底 `#1d4ed8`）
-- 文字 `#f8fafc` / `#cbd5e1` / `#94a3b8` / `#64748b`
-- 语义色：成功 `#22c55e` · 警告 `#f59e0b` · 危险 `#dc2626`
-- 圆角阶梯 8 / 10 / 12px，字号 12/13/14/16/18/20/22/26px，`"Microsoft YaHei UI"`
+`stock_new` 是深蓝底、亮蓝主色的交易看板，信息以卡片网格组织；而 VoxMic 是
+**托盘常驻的音频工具**：窗口小、配置项密集、核心信息是"链路状态 + 设备 + 流状态"，不是数据卡片。
+套用看板的深蓝配色只会得到一个"看起来像别的软件"的设置窗——**其视觉规范对本项目不具参考价值**。
+→ 视觉规范重新设计；`.slint` 的语法与控件用法以 **Slint 官方文档**为准，不以任何现有项目为模板。
 
-另有 VoxType（`D:\GITHUB_melody0709\VoxType`）的工程基建可对齐：分层契约、双轨错误模型、
-`/utf-8` + `NOMINMAX` 构建红线、`.ps1` 脚本纯 ASCII 要求。
+### 设计定位
+
+一句话：**原生工具感的深色音频控制台**。
+
+- **结构**：单列分区（section）+ 顶部常驻状态头（实时状态与电平），不是卡片网格
+- **密度**：4px 基准网格，比看板式布局紧凑——设置项多、窗口小
+- **强调色**：青绿（信号 / 音频语义），刻意避开通用的"科技蓝"
+- **语义色**：直接映射引擎真实状态，让窗口与托盘图标说同一种语言
+
+### 设计 token（B5 落成 `ui/theme.slint` 的 `global`）
+
+| 类别 | 值 | 说明 |
+|---|---|---|
+| 窗口底 | `#131417` | 中性石墨，不偏蓝 |
+| 主面板 | `#1b1d21` | |
+| 嵌套区 | `#22252a` | |
+| 描边 / 分隔 | `#2f3339` | |
+| 焦点环 | `#3d434b` | 保证键盘焦点可见 |
+| 主色 accent | `#14b8a6` · hover `#0d9488` · pressed `#0f766e` | 青绿 |
+| 主文字 | `#e8eaed` | |
+| 次文字 | `#b9bec6` | |
+| 辅助文字 | `#8b919a` | |
+| 禁用 / 提示 | `#5f656e` | |
+| 圆角阶梯 | 4px 控件 / 8px 分组 / 14px 窗口 | |
+| 字号阶梯 | 11 / 12 / 13 / 15 / 17 px | 工具类应用，不设展示级大字号 |
+| 间距阶梯 | 4 / 8 / 12 / 16 / 24 px | 4px 基准网格 |
+| 字体 | `"Segoe UI Variable Text"`，中文由系统字体回退 | 偏系统原生观感，非 Web 感 |
+
+### 状态色 = 引擎状态（与托盘图标对齐）
+
+| 状态 | 色 | 含义 | 现有托盘图标 |
+|---|---|---|---|
+| 待机 idle | `#6b7280` | 托盘常驻、未推流 | `voxmic_idle.ico` |
+| 就绪 armed | `#38bdf8` | 链路已建立、尚无消费方 | `voxmic_connected.ico` |
+| 推流中 streaming | `#14b8a6` | 与主色一致 = "信号在流动" | `voxmic_streaming.ico` |
+| 降级 degraded | `#f59e0b` | DPDFNet 不可用 / 空块降级 | — |
+| 故障 fault | `#ef4444` | socket 断开、设备丢失 | — |
+
+状态色须与 `tray_icon.cpp` 的图标状态语义一致，B5 落地时确认不冲突。
+
+### 落地时必须验证（`AGENTS.md` 硬要求，不得跳过）
+
+`.slint` 改完必须跑 `slint-viewer --check` 校验语法 **并** `--screenshot` 看渲染结果，
+**未看过渲染不得宣称完成**。重点确认两点：
+
+1. `"Segoe UI Variable Text"` 在本机可用、中文回退渲染正常；
+2. `SLINT_STYLE` 默认 `fluent` 的控件自带底色与上表的冲突程度 → 据此决定是覆写风格 token 还是自绘控件。
+
+> 注：本次准备**不预先创建 `ui/theme.slint`**。守卫第 5 节规定 `ui/` 下存在任一 `.slint`
+> 而无 `AboutSlint` 即令构建失败，因此 `theme.slint` 必须与带 `AboutSlint` 的首个窗口同批落地（见 §9 的 B4 / B5）。
+
+### VoxType 的**非视觉**基建仍可对齐 `[已核实]`
+
+`D:\GITHUB_melody0709\VoxType` 的工程基建继续对齐：分层契约、双轨错误模型、
+`/utf-8` + `NOMINMAX` 构建红线、`.ps1` 脚本纯 ASCII 要求。**仅限工程基建，不涉视觉。**
