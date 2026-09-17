@@ -17,8 +17,12 @@ project(VoxMic
 set(VOXMIC_PRODUCT_VERSION
     "${VOXMIC_VERSION_MAJOR}.${VOXMIC_VERSION_MINOR}.${VOXMIC_VERSION_PATCH}")
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# windows.h 会定义 min/max 宏，与 std::min / std::max 冲突（C2589）。
+# 统一在这里定义一次，避免散落在各头文件里（wasapi_output.h 曾单独定义）。
+add_compile_definitions(NOMINMAX)
 
 option(VOXMIC_ENABLE_DPDFNET
     "Compile the optional DPDFNet backend and expose it in settings" OFF)
