@@ -1,6 +1,9 @@
 #pragma once
 
+#include <expected>
 #include <string>
+
+#include "app_error.h"
 
 class Config {
 public:
@@ -26,5 +29,7 @@ public:
     bool alwaysHot = false;
 
     static Config load();
-    bool save() const;
+    // Reports why a write failed instead of a bare false: the caller
+    // shows that reason and then rolls back.
+    std::expected<void, AppError> save() const;
 };

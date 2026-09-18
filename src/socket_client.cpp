@@ -8,15 +8,15 @@ SocketClient::~SocketClient() {
     cleanup();
 }
 
-bool SocketClient::init() {
+std::expected<void, AppError> SocketClient::init() {
     WSADATA wsaData;
-    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
+    const int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
     if (result != 0) {
-        printf("WSAStartup failed: %d\n", result);
-        return false;
+        return std::unexpected(AppError::make(AppErrorCode::unavailable,
+            "WSAStartup failed with " + std::to_string(result)));
     }
     m_initialized = true;
-    return true;
+    return {};
 }
 
 void SocketClient::cleanup() {
@@ -26,13 +26,14 @@ void SocketClient::cleanup() {
     }
 }
 
-bool SocketClient::connect(const std::string& host, int port) {
+std::expected<void, AppError> SocketClient::connect(const std::string& host,
+    int port) {
     disconnect();
 
     m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (m_socket == INVALID_SOCKET) {
-        printf("socket() failed: %d\n", WSAGetLastError());
-        return false;
+        return std::unexpected(AppError::make(AppErrorCode::unavailable,
+            "socket() failed with " + std::to_string(WSAGetLastError())));
     }
 
     sockaddr_in addr{};
@@ -41,10 +42,12 @@ bool SocketClient::connect(const std::string& host, int port) {
     inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
     if (::connect(m_socket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        printf("connect() failed: %d\n", WSAGetLastError());
+        const int err = WSAGetLastError();
         closesocket(m_socket);
         m_socket = INVALID_SOCKET;
-        return false;
+        return std::unexpected(AppError::make(AppErrorCode::unavailable,
+            "connect(" + host + ":" + std::to_string(port) + ") failed with "
+            + std::to_string(err)));
     }
 
     // Bound every blocking read. Without this, a peer that stalls part-way
@@ -58,7 +61,7 @@ bool SocketClient::connect(const std::string& host, int port) {
         printf("setsockopt(SO_RCVTIMEO) failed: %d\n", WSAGetLastError());
     }
 
-    return true;
+    return {};
 }
 
 void SocketClient::disconnect() {

@@ -5,7 +5,10 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <atomic>
+#include <expected>
 #include <string>
+
+#include "app_error.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -25,10 +28,12 @@ public:
     // shutdown can wait for the bridge thread to notice g_appState.running going false.
     static constexpr int RECV_TIMEOUT_MS = 500;
 
-    bool init();
+    // Startup and connection report the reason; the bridge logs it instead
+    // of printing a raw WinSock number.
+    std::expected<void, AppError> init();
     void cleanup();
 
-    bool connect(const std::string& host, int port);
+    std::expected<void, AppError> connect(const std::string& host, int port);
     void disconnect();
     bool isConnected() const;
 

@@ -627,8 +627,12 @@ static bool commitSettings(HWND hWnd) {
     Config committed = previous;
     if (!saveUiToConfig(hWnd, &committed)) return false;
 
-    if (!committed.save()) {
-        const bool rolledBack = previous.save();
+    const auto committedSave = committed.save();
+    if (!committedSave) {
+        const bool rolledBack = previous.save().has_value();
+        printf("ERROR: config.ini write failed (%s)\n",
+            describe(committedSave.error()).c_str());
+        fflush(stdout);
         restoreDspAfterFailedCommit(hWnd);
         MessageBoxA(hWnd,
             rolledBack
@@ -643,7 +647,7 @@ static bool commitSettings(HWND hWnd) {
     // Registry state is external to config.ini. If this step fails, restore
     // the previous file contents and keep the in-memory config unchanged.
     if (!saveStartupRegistrationControl(hWnd)) {
-        if (!previous.save()) {
+        if (!previous.save().has_value()) {
             restoreDspAfterFailedCommit(hWnd);
             MessageBoxA(hWnd,
                 "Startup registration failed, and config.ini could not be rolled back. "
@@ -751,7 +755,7 @@ static void rollbackRuntimeConfigToggle(HWND hWnd, const Config& previous) {
         g_appState.trayIcon->setAlwaysHot(previous.alwaysHot);
     }
 
-    const bool rolledBack = previous.save();
+    const bool rolledBack = previous.save().has_value();
     MessageBoxA(hWnd,
         rolledBack
             ? "The setting changed for this session but could not be saved. It has been rolled back."
@@ -1337,7 +1341,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             setDemandModeRuntime(newVal);
             if (g_appState.trayIcon) g_appState.trayIcon->setDemandMode(newVal);
             g_appState.config.demandMode = newVal;
-            if (!g_appState.config.save()) {
+            if (!g_appState.config.save().has_value()) {
                 rollbackRuntimeConfigToggle(hWnd, previous);
                 break;
             }
@@ -1354,7 +1358,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             g_appState.alwaysHot.store(newVal);
             if (g_appState.trayIcon) g_appState.trayIcon->setAlwaysHot(newVal);
             g_appState.config.alwaysHot = newVal;
-            if (!g_appState.config.save()) {
+            if (!g_appState.config.save().has_value()) {
                 rollbackRuntimeConfigToggle(hWnd, previous);
                 break;
             }

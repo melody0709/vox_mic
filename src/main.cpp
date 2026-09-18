@@ -171,8 +171,9 @@ void audioBridgeThread() {
     ADBControl adb;
     SocketClient socketClient;
 
-    if (!socketClient.init()) {
-        printf("ERROR: Failed to initialize Winsock\n");
+    if (const auto started = socketClient.init(); !started) {
+        printf("ERROR: Failed to initialize Winsock (%s)\n",
+            describe(started.error()).c_str());
         return;
     }
 
@@ -326,9 +327,10 @@ void audioBridgeThread() {
             LARGE_INTEGER qpcFreq, t0, t1;
             QueryPerformanceFrequency(&qpcFreq);
             QueryPerformanceCounter(&t0);
-            if (!socketClient.connect(host, port)) {
+            if (const auto linked = socketClient.connect(host, port); !linked) {
                 connectFailCount++;
-                printf("[Bridge] connect fail #%d\n", connectFailCount);
+                printf("[Bridge] connect fail #%d (%s)\n", connectFailCount,
+                    describe(linked.error()).c_str());
                 fflush(stdout);
                 if (!adb.isDeviceOnline(serial)) {
                     enterAdbLost("connect failed and ADB device is offline");

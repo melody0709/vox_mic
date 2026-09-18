@@ -118,7 +118,7 @@ Config Config::load() {
     return cfg;
 }
 
-bool Config::save() const {
+std::expected<void, AppError> Config::save() const {
     std::string path = getIniPath();
 
     // WritePrivateProfileStringA updates individual keys; this sequence is not
@@ -146,5 +146,9 @@ bool Config::save() const {
     ok = writeIniInt(path.c_str(), "DebugConsole", debugConsole ? 1 : 0) && ok;
     ok = writeIniInt(path.c_str(), "DemandMode", demandMode ? 1 : 0) && ok;
     ok = writeIniInt(path.c_str(), "AlwaysHot", alwaysHot ? 1 : 0) && ok;
-    return ok;
+    if (!ok) {
+        return std::unexpected(AppError::make(AppErrorCode::io,
+            "could not write every key to " + path));
+    }
+    return {};
 }
