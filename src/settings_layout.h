@@ -64,6 +64,7 @@ public:
 
     HFONT bodyFont() const { return m_bodyFont; }
     HFONT sectionFont() const { return m_sectionFont; }
+    HFONT hintFont() const { return m_hintFont; }
 
     int windowWidthPx() const;
     int windowHeightPx() const;
@@ -73,6 +74,8 @@ public:
     static int pageContentHeightDesign(int page);
 
 private:
+    enum class FontKind : char { Body, Section, Hint };
+
     struct Item {
         HWND hwnd = nullptr;
         int id = 0;
@@ -86,7 +89,7 @@ private:
         // than the window by the caption and border, so using the window height
         // as if it were the client height puts the buttons off the client area.
         bool anchoredBottom = false;
-        bool sectionFont = false;
+        FontKind fontKind = FontKind::Body;
         // Width comes from the page's right edge instead of design.right.
         bool stretchRight = false;
         // Height comes from the page's bottom edge, for the page surface.
@@ -116,6 +119,7 @@ private:
     HWND m_tab = nullptr;
     HFONT m_bodyFont = nullptr;
     HFONT m_sectionFont = nullptr;
+    HFONT m_hintFont = nullptr;
     HBRUSH m_windowBrush = nullptr;
     HBRUSH m_panelBrush = nullptr;
     HBRUSH m_strokeBrush = nullptr;

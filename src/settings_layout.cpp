@@ -108,15 +108,17 @@ int Layout::pageContentHeightDesign(int page) {
 void Layout::makeFonts() {
     if (m_bodyFont) { DeleteObject(m_bodyFont); m_bodyFont = nullptr; }
     if (m_sectionFont) { DeleteObject(m_sectionFont); m_sectionFont = nullptr; }
+    if (m_hintFont) { DeleteObject(m_hintFont); m_hintFont = nullptr; }
     const char* face = metrics::FontFamily;
-    m_bodyFont = CreateFontA(-S(metrics::FontBody), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
-                             FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                             CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH | FF_DONTCARE, face);
-    m_sectionFont = CreateFontA(-S(metrics::FontSection), 0, 0, 0, FW_SEMIBOLD, FALSE,
-                                FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                                DEFAULT_PITCH | FF_DONTCARE, face);
+    m_bodyFont = CreateFontA(-S(metrics::FontBody), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+    m_sectionFont = CreateFontA(-S(metrics::FontSection), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
+    m_hintFont = CreateFontA(-S(metrics::FontHint), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                             CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
     makeBrushes();
 }
 
@@ -124,11 +126,9 @@ void Layout::destroyResources() {
     for (const Item& it : m_items) {
         if (it.hwnd) RemovePropW(it.hwnd, kRoleProperty);
     }
-    if (m_bodyFont) { DeleteObject(m_bodyFont); m_bodyFont = nullptr; }
-    if (m_sectionFont) { DeleteObject(m_sectionFont); m_sectionFont = nullptr; }
-    if (m_windowBrush) { DeleteObject(m_windowBrush); m_windowBrush = nullptr; }
-    if (m_panelBrush) { DeleteObject(m_panelBrush); m_panelBrush = nullptr; }
-    if (m_strokeBrush) { DeleteObject(m_strokeBrush); m_strokeBrush = nullptr; }
+    auto del = [](auto& obj) { if (obj) { DeleteObject(obj); obj = nullptr; } };
+    del(m_bodyFont); del(m_sectionFont); del(m_hintFont);
+    del(m_windowBrush); del(m_panelBrush); del(m_strokeBrush);
 }
 
 void Layout::makeBrushes() {
@@ -211,8 +211,7 @@ void Layout::place(Item& item) {
     }
     if (item.anchoredRight) x += client.right - S(metrics::WinW);
     if (item.anchoredBottom) {
-        y = client.bottom - S(item.design.bottom - item.design.top) -
-            S(metrics::FooterH - metrics::FooterBtnY);
+        y = client.bottom - S(metrics::FooterH - metrics::FooterBtnY);
     }
 
     int w = S(item.design.right - item.design.left);
@@ -347,9 +346,9 @@ void Layout::createFooter(HWND parent, HINSTANCE instance) {
     };
     const FooterBtn buttons[] = {
         {IDC_BTN_RESET, "Reset to Defaults", false, 0, metrics::FooterBtnWideW},
-        {IDC_BTN_CANCEL, "Cancel", true, 2, metrics::FooterBtnW},
-        {IDC_BTN_APPLY, "Apply", true, 1, metrics::FooterBtnW},
-        {IDC_BTN_OK, "OK", true, 0, metrics::FooterBtnW},
+        {IDC_BTN_OK, "OK", true, 2, metrics::FooterBtnW},
+        {IDC_BTN_CANCEL, "Cancel", true, 1, metrics::FooterBtnW},
+        {IDC_BTN_APPLY, "Apply", true, 0, metrics::FooterBtnW},
     };
     for (const FooterBtn& b : buttons) {
         const DWORD style = WS_CHILD | WS_VISIBLE | WS_TABSTOP |
@@ -405,7 +404,7 @@ void Layout::createPageContent(HWND parent, HINSTANCE instance, int page) {
             applyFont(label, m_sectionFont);
             push(label, 0, 0, y, 0, metrics::SectionTitleH, TextRole::Transparent,
                  true);
-            m_items.back().sectionFont = true;
+            m_items.back().fontKind = FontKind::Section;
             y += metrics::SectionTitleH;
 
             // A full-width hairline under the title. Deliberately not measured
@@ -443,9 +442,10 @@ void Layout::createPageContent(HWND parent, HINSTANCE instance, int page) {
                 case FieldKind::Note: {
                     HWND note = CreateStatic(parent, instance, 0, SS_LEFT);
                     if (fld.hint) SetWindowTextA(note, fld.hint);
-                    applyFont(note, m_bodyFont);
+                    applyFont(note, m_hintFont);
                     push(note, 0, 0, y, 0, fld.hintLines * metrics::HintH,
-                         TextRole::Transparent, true);
+                         TextRole::Hint, true);
+                    m_items.back().fontKind = FontKind::Hint;
                     break;
                 }
                 case FieldKind::Status: {
@@ -569,8 +569,9 @@ void Layout::createPageContent(HWND parent, HINSTANCE instance, int page) {
                 HWND hint =
                     CreateStatic(parent, instance, fld.hintId, SS_LEFT | SS_NOPREFIX);
                 if (fld.hint) SetWindowTextA(hint, fld.hint);
-                applyFont(hint, m_bodyFont);
-                push(hint, fld.id, 0, y, 0, metrics::HintH, TextRole::Hint, true);
+                applyFont(hint, m_hintFont);
+                push(hint, fld.id, 0, y, 0, hintHeightDesign(fld), TextRole::Hint, true);
+                m_items.back().fontKind = FontKind::Hint;
                 y += hintHeightDesign(fld);
             }
         }
@@ -587,16 +588,19 @@ void Layout::relayout(HWND parent) {
 
     // Re-apply the freshly scaled fonts; section headers keep the semibold face.
     for (Item& it : m_items) {
-        applyFont(it.hwnd, it.sectionFont ? m_sectionFont : m_bodyFont);
+        HFONT f = m_bodyFont;
+        if (it.fontKind == FontKind::Section) f = m_sectionFont;
+        else if (it.fontKind == FontKind::Hint) f = m_hintFont;
+        applyFont(it.hwnd, f);
     }
 
     // Chrome rectangles are derived from the metrics rather than remembered, so
     // re-derive them at the new scale.
     static const struct { int id; bool right; int slot; int width; } kFooter[] = {
         {IDC_BTN_RESET, false, 0, metrics::FooterBtnWideW},
-        {IDC_BTN_CANCEL, true, 2, metrics::FooterBtnW},
-        {IDC_BTN_APPLY, true, 1, metrics::FooterBtnW},
-        {IDC_BTN_OK, true, 0, metrics::FooterBtnW},
+        {IDC_BTN_OK, true, 2, metrics::FooterBtnW},
+        {IDC_BTN_CANCEL, true, 1, metrics::FooterBtnW},
+        {IDC_BTN_APPLY, true, 0, metrics::FooterBtnW},
     };
     for (const auto& f : kFooter) {
         for (Item& it : m_items) {

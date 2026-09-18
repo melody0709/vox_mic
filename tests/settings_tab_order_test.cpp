@@ -1,4 +1,6 @@
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commctrl.h>
@@ -39,7 +41,7 @@ int main() {
         IDC_COMBO_DEVICE, IDC_BTN_REFRESH, IDC_HOST_EDIT, IDC_PORT_EDIT,
         IDC_COMBO_ANDROID_APP, IDC_TRACKBAR_GAIN, IDC_CHECK_NS,
         IDC_CHECK_AEC, IDC_CHECK_AGC, IDC_CHECK_DEBUG, IDC_CHECK_STARTUP,
-        IDC_BTN_RESET, IDC_BTN_CANCEL, IDC_BTN_APPLY, IDC_BTN_OK, IDC_TAB_MAIN
+        IDC_BTN_RESET, IDC_BTN_OK, IDC_BTN_CANCEL, IDC_BTN_APPLY, IDC_TAB_MAIN
     };
 
     std::vector<int> actualPage0;
@@ -60,7 +62,7 @@ int main() {
     std::vector<int> expectedPage1 = {
         IDC_CHECK_NR, IDC_COMBO_NR_BACKEND, IDC_TRACKBAR_NRSTR,
         IDC_CHECK_EQ, IDC_TRACKBAR_PRES, IDC_TRACKBAR_BASS, IDC_CHECK_COMP,
-        IDC_BTN_RESET, IDC_BTN_CANCEL, IDC_BTN_APPLY, IDC_BTN_OK, IDC_TAB_MAIN
+        IDC_BTN_RESET, IDC_BTN_OK, IDC_BTN_CANCEL, IDC_BTN_APPLY, IDC_TAB_MAIN
     };
 
     std::vector<int> actualPage1;

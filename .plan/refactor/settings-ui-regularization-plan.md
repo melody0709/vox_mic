@@ -1,13 +1,16 @@
 # 设置界面规则化 + 浅色主题落地方案
 
-> 状态：**S1–S5 已完整收口与深度优化（2026-09-17）** · 决策 D1=A、D2=A、D3=A 均已落地
-> 验证证据：`settings_tab_order_test` 自动化遍历测试 100% PASS（验证两页共 28 步严格焦点拓扑）、`mic_session_state_test` 全过、构建 0 error / 0 warning、架构守卫 PASS（extern 0/0, u8 0/0, thread 3/3）、DPDFNet 4 个 smoke 全过
-> **遗留收口与自审修复**：
-> 1. **Tab 遍历顺序规范化**：解耦页脚按钮创建时序，改为由 `createFooter` 在页面字段创建后构建，消除 Tab 键由标签头直跳页脚的问题，形成 Tab 控件 -> 各字段顺序 -> Reset -> Cancel -> Apply -> OK -> Tab 的严格单向环形遍历。
-> 2. **几何双倍内边距修复**：修正 `ColFieldX = ColLabelW + GapLabelField`，消除叠加多余 `PadPageX` 导致控件与标签间距达 26px 及 Refresh 按钮冲出右侧边框的问题。
-> 3. **行内复选框灰色残留与溢出修复**：修正 `sameRowAsPrevious` 为 `TextRole::Opaque` 并细分列宽，彻底消除 AcousticEchoCanceler 的 `#F0F0F0` 系统灰底与右缘溢出。
-> 4. **动态字段命令分发与键盘确认**：`WM_COMMAND` 改为动态字段表匹配，支持 `IDOK` 回车确认，新增字段零代码侵入即可获得脏标记与预览联动。
-> 5. **实时增益（Gain）预览与禁用提示色绑定**：增益滑动条纳入音频实时预览与取消回滚链路；`WM_CTLCOLORSTATIC` 确保禁用状态下 Hint 文字正确呈现禁用语义色。
+> 状态：**S1–S5 已完整收口与深度优化并解决全部隐藏缺陷（2026-09-17）** · 决策 D1=A、D2=A、D3=A 均已落地
+> 验证证据：`settings_tab_order_test` 自动化遍历测试 100% PASS（验证标准 Windows 焦点拓扑：Reset -> OK -> Cancel -> Apply -> Tab）、`mic_session_state_test` 全过、构建 0 error / 0 warning、架构守卫 PASS（extern 0/0, u8 0/0, thread 3/3）、DPDFNet 4 个 smoke 全过
+> **遗留收口与自审修复记录**：
+> 1. **Win32 标准按钮次序与 Tab 遍历规范化**：修正页脚按钮布局与焦点次序，从错误的 `Cancel -> Apply -> OK` 彻底更正为 Windows 平台标准 `Reset -> OK -> Cancel -> Apply -> Tab`（视觉位置从左至右与键盘 Tab 键环形遍历次序完全一致）。
+> 2. **页脚按钮跨线穿透几何 Bug 修复**：修正 `Layout::place` 中 `anchoredBottom` 的计算公式，消除对控件高度的重复双重扣减，彻底解决按钮顶部跨越并侵入页脚分割线 10px 的视觉重叠问题，使按钮在 56px 页脚带中上下边距完美匀称。
+> 3. **多行说明文字（Hint）高度截断 Bug 修复**：修正 `Layout::createPageContent` 中向布局器注册 Hint 高度时写死 `metrics::HintH`（16px）的缺陷，改为按声明的实际行数动态传递 `hintHeightDesign(fld)`，消除多行说明文字的截断隐患。
+> 4. **字号阶梯规范完整落地（FontHint 11/12px）**：在 `metrics` 与 `Layout` 中正式落地计划约定的提示字号 `FontHint`，并将 Hints 与 `FieldKind::Note` 绑定至 `m_hintFont`，消除 13px 主体字塞进 16px 说明行的紧绷感与降级问题。
+> 5. **静态注释字段（Note）语义色与字体修正**：修正 `FieldKind::Note` 误用 `TextRole::Transparent` 导致使用高对比度主文本颜色的问题，统一映射为 `TextRole::Hint`（`theme::TextHint`）与说明字体，理顺页面视觉层级。
+> 6. **高对比度无障碍模式（High Contrast）系统色全面对齐**：全面修复 `WM_CTLCOLORSTATIC`、`WM_CTLCOLORBTN`、`WM_ERASEBKGND`、`WM_PAINT`、`WM_DRAWITEM` 中对非高对比度主题刷的无条件写死问题；在开启高对比度时，自动对齐系统调色板（`COLOR_BTNFACE`、`COLOR_WINDOW`、`COLOR_WINDOWTEXT`、`COLOR_BTNTEXT`、`COLOR_GRAYTEXT`），杜绝高对比度黑底下的白字白底不可读 Bug。
+> 7. **窗口级防闪烁消除（WS_CLIPCHILDREN）**：为主设置窗口补充 `WS_CLIPCHILDREN` 窗口样式，防止主窗口重绘背景时全量擦除擦伤子控件引发的刷新闪烁。
+> 8. **动态联动与切页状态实时刷新**：`WM_COMMAND` 在任意 Checkbox 切换时均驱动全字段依赖求值；`WM_NOTIFY` 在切至 DSP 页时即刻触发后端与链式状态的同步刷新，消除延迟。
 > 上游分析（对标证据）：`.plan/refactor/settings-ui-benchmark-vs-voxtype.html`
 > 标注规则：`[已核实]` = 读过源码/二进制/全历史确认；`[推断]` = 待实测确认
 > 本方案**不复制 VoxType 的外观**。VoxType 只证明"这三件事在 Win32 原生控件上够用"。

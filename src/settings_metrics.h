@@ -39,8 +39,7 @@ constexpr int FooterBtnY = 22;   // inside the footer band, below the divider
 
 // --- page content ---------------------------------------------------------
 
-constexpr int PadPageX = 16;     // page edge -> content
-constexpr int PadPageY = 12;
+constexpr int PadPageX = 16, PadPageY = 12;  // page edge -> content
 constexpr int ColLabelW = 110;   // left label column
 constexpr int GapLabelField = 10;
 constexpr int ColFieldX = ColLabelW + GapLabelField;
@@ -71,6 +70,7 @@ constexpr int ToggleColW = 240;  // paired checkboxes (240 * 2 <= 488)
 // instead of depending on the face's cell metrics.
 constexpr int FontBody = 12;
 constexpr int FontSection = 12;
+constexpr int FontHint = 11;
 
 constexpr const char* FontFamily = "Segoe UI";
 

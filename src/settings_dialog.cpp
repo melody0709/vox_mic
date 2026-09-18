@@ -25,11 +25,10 @@ struct SettingsDialogData {
     Config editBaseConfig;
     bool hasEditBase = false;
     bool dirty = false;
+    bool loading = false;
     settings::Layout layout;
     HWND hApply = nullptr;
     HWND hDeviceCombo = nullptr;
-    HWND hAndroidAppCombo = nullptr;
-    HWND hNrBackendCombo = nullptr;
     HWND hDspChainStatus = nullptr;
     HWND hNrStrengthHint = nullptr;
     HBRUSH hInputBrush = nullptr;
@@ -163,6 +162,9 @@ static void setSettingsDirty(HWND hWnd, bool dirty) {
 }
 
 static void markSettingsDirty(HWND hWnd) {
+    SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(
+        hWnd, GWLP_USERDATA);
+    if (pData && pData->loading) return;
     setSettingsDirty(hWnd, true);
 }
 
@@ -387,6 +389,9 @@ static void updateSliderLabel(HWND hWnd, const settings::FieldSpec& field) {
 
 static void loadAllUiFromConfig(HWND hWnd, const Config* cfg) {
     if (!cfg) return;
+    SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(
+        hWnd, GWLP_USERDATA);
+    if (pData) pData->loading = true;
 
     forEachField([&](const settings::FieldSpec& field) {
         // Every binding test also checks that the table row actually names a
@@ -460,6 +465,7 @@ static void loadAllUiFromConfig(HWND hWnd, const Config* cfg) {
 
     updateDspControlStates(hWnd);
     updateDenoiseBackendUi(hWnd);
+    if (pData) pData->loading = false;
 }
 
 // Writes one field's current value into cfg. With `validate` set, a Number field
@@ -828,8 +834,6 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         pData->hApply = pData->layout.footerButton(IDC_BTN_APPLY);
         pData->hDeviceCombo = pData->layout.control(IDC_COMBO_DEVICE);
-        pData->hAndroidAppCombo = pData->layout.control(IDC_COMBO_ANDROID_APP);
-        pData->hNrBackendCombo = pData->layout.control(IDC_COMBO_NR_BACKEND);
         pData->hDspChainStatus = pData->layout.control(IDC_LABEL_DSP_CHAIN_STATUS);
         pData->hNrStrengthHint = pData->layout.hint(IDC_TRACKBAR_NRSTR);
 
@@ -888,16 +892,18 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         const DRAWITEMSTRUCT* draw = (const DRAWITEMSTRUCT*)lParam;
         if (draw && draw->CtlID == IDC_LABEL_NR_BACKEND_STATUS) {
             FillRect(draw->hDC, &draw->rcItem,
-                (pData && pData->layout.panelBrush())
-                    ? pData->layout.panelBrush()
-                    : GetSysColorBrush(COLOR_BTNFACE));
+                (useSystemPalette(pData) || !pData || !pData->layout.panelBrush())
+                    ? GetSysColorBrush(COLOR_BTNFACE)
+                    : pData->layout.panelBrush());
 
             HFONT oldFont = nullptr;
             if (pData && pData->layout.bodyFont()) {
                 oldFont = (HFONT)SelectObject(draw->hDC, pData->layout.bodyFont());
             }
             SetBkMode(draw->hDC, TRANSPARENT);
-            SetTextColor(draw->hDC, denoiseStatusColor(hWnd));
+            SetTextColor(draw->hDC, useSystemPalette(pData)
+                ? GetSysColor(COLOR_BTNTEXT)
+                : denoiseStatusColor(hWnd));
 
             char text[512] = {};
             GetWindowTextA(draw->hwndItem, text, (int)sizeof(text));
@@ -915,18 +921,15 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         HWND hCtrl = (HWND)lParam;
         HDC hdc = (HDC)wParam;
 
-        const bool isInputCombo = pData &&
-            (hCtrl == pData->hDeviceCombo ||
-             hCtrl == pData->hAndroidAppCombo ||
-             hCtrl == pData->hNrBackendCombo);
-        if (isInputCombo) {
-            HBRUSH brush = inputBackgroundBrush(pData);
+        char className[16] = {};
+        GetClassNameA(hCtrl, className, sizeof(className));
+        if (_stricmp(className, "COMBOBOX") == 0) {
             SetBkMode(hdc, OPAQUE);
             SetBkColor(hdc, inputBackgroundColor(pData));
             SetTextColor(hdc, IsWindowEnabled(hCtrl)
                 ? inputTextColor(pData)
-                : GetSysColor(COLOR_GRAYTEXT));
-            return (LRESULT)brush;
+                : disabledTextColor(pData));
+            return (LRESULT)inputBackgroundBrush(pData);
         }
 
         // Nearly every text widget paints with a transparent background so it
@@ -941,18 +944,15 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             return (LRESULT)GetStockObject(NULL_BRUSH);
         }
         SetBkMode(hdc, OPAQUE);
-        SetBkColor(hdc,
-            pData && pData->layout.panelBrush()
-                ? theme::Panel
-                : GetSysColor(COLOR_BTNFACE));
+        COLORREF bg = useSystemPalette(pData) ? GetSysColor(COLOR_BTNFACE) : theme::Panel;
+        SetBkColor(hdc, bg);
         SetTextColor(hdc, !IsWindowEnabled(hCtrl)
                               ? disabledTextColor(pData)
                               : (role == settings::TextRole::Hint ? hintTextColor(pData)
                                                                   : labelTextColor(pData)));
-        if (pData && pData->layout.panelBrush()) {
-            return (LRESULT)pData->layout.panelBrush();
-        }
-        return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+        if (useSystemPalette(pData)) return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+        if (pData && pData->layout.panelBrush()) return (LRESULT)pData->layout.panelBrush();
+        return (LRESULT)GetStockObject(WHITE_BRUSH);
     }
 
     case WM_CTLCOLOREDIT: {
@@ -984,9 +984,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     // a faint box of the wrong shade.
     case WM_CTLCOLORBTN: {
         HDC hdc = (HDC)wParam;
-        if (pData && pData->layout.windowBrush()) {
-            return (LRESULT)pData->layout.windowBrush();
-        }
+        if (useSystemPalette(pData)) return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+        if (pData && pData->layout.windowBrush()) return (LRESULT)pData->layout.windowBrush();
         SetBkMode(hdc, TRANSPARENT);
         return (LRESULT)GetStockObject(NULL_BRUSH);
     }
@@ -997,9 +996,9 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_ERASEBKGND: {
         RECT rc;
         GetClientRect(hWnd, &rc);
-        HBRUSH brush = (pData && pData->layout.windowBrush())
-                           ? pData->layout.windowBrush()
-                           : GetSysColorBrush(COLOR_BTNFACE);
+        HBRUSH brush = (useSystemPalette(pData) || !pData || !pData->layout.windowBrush())
+                           ? GetSysColorBrush(COLOR_BTNFACE)
+                           : pData->layout.windowBrush();
         FillRect((HDC)wParam, &rc, brush);
         return 1;
     }
@@ -1009,18 +1008,18 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         HDC hdc = BeginPaint(hWnd, &ps);
         RECT rc;
         GetClientRect(hWnd, &rc);
-        HBRUSH brush = (pData && pData->layout.windowBrush())
-                           ? pData->layout.windowBrush()
-                           : GetSysColorBrush(COLOR_BTNFACE);
+        HBRUSH brush = (useSystemPalette(pData) || !pData || !pData->layout.windowBrush())
+                           ? GetSysColorBrush(COLOR_BTNFACE)
+                           : pData->layout.windowBrush();
         FillRect(hdc, &rc, brush);
         // A hairline across the top of the footer band closes the page off from
         // the button row. One physical pixel keeps it crisp at any DPI.
         const int footerTop = rc.bottom - metrics::S(metrics::FooterH);
         RECT divider = {metrics::S(metrics::PadX), footerTop,
                         rc.right - metrics::S(metrics::PadX), footerTop + 1};
-        HBRUSH stroke = (pData && pData->layout.strokeBrush())
-                            ? pData->layout.strokeBrush()
-                            : GetSysColorBrush(COLOR_3DSHADOW);
+        HBRUSH stroke = (useSystemPalette(pData) || !pData || !pData->layout.strokeBrush())
+                            ? GetSysColorBrush(COLOR_3DSHADOW)
+                            : pData->layout.strokeBrush();
         FillRect(hdc, &divider, stroke);
         EndPaint(hWnd, &ps);
         return 0;
@@ -1032,6 +1031,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             HWND tab = GetDlgItem(hWnd, IDC_TAB_MAIN);
             const int sel = tab ? (int)SendMessageA(tab, TCM_GETCURSEL, 0, 0) : 0;
             pData->layout.showPage(sel);
+            if (sel == 1) updateDenoiseBackendUi(hWnd);
         }
         return 0;
     }
@@ -1070,6 +1070,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         if (pField) {
             if (pField->kind == settings::FieldKind::Toggle && notify == BN_CLICKED) {
                 markSettingsDirty(hWnd);
+                updateDspControlStates(hWnd);
                 if (fieldPage == 1) applyDspPreviewFromUi(hWnd);
             } else if (pField->kind == settings::FieldKind::Choice && notify == CBN_SELCHANGE) {
                 markSettingsDirty(hWnd);
@@ -1231,7 +1232,7 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
         WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
         SETTINGS_CLASS,
         "VoxMic - Settings",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU,
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN,
         0, 0, metrics::S(metrics::WinW), metrics::S(metrics::WinH),
         NULL, NULL, hInstance, pConfig);
 
