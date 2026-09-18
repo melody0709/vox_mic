@@ -15,6 +15,20 @@ enum class DenoiseBackendKind : int {
     Off = 2,
 };
 
+// Where the DPDFNet session sits in its on-demand lifecycle.
+//
+// The payload is ~43 MB resident (onnxruntime plus a 10 MB model), measured, so
+// a user who selected RNNoise must never load it. The UI needs to tell "not
+// loaded yet" apart from "tried and failed", which a single bool cannot
+// express - it would report "unavailable" for a backend the user never asked
+// to use.
+enum class DpdfnetLoadState : int {
+    NotLoaded = 0,  // nothing loaded; will load on demand
+    Loading = 1,
+    Ready = 2,
+    Failed = 3,     // the payload is present but refused to start
+};
+
 // Single owner of everything shared across threads.
 //
 // Before this existed the state was ~20 free globals defined in main.cpp and
@@ -38,6 +52,10 @@ struct AppState {
     std::atomic<uint64_t> denoiseResetEpoch{1};
     std::atomic<bool> dpdfnetAvailable{false};
     std::atomic<bool> dpdfnetDegraded{false};
+    // DpdfnetLoadState. dpdfnetAvailable above stays the "is it usable" bool so
+    // existing degrade logic is untouched; this one adds the not-loaded case.
+    std::atomic<int> dpdfnetLoadState{
+        static_cast<int>(DpdfnetLoadState::NotLoaded)};
     std::atomic<int> denoiseEffectiveBackend{
         static_cast<int>(DenoiseBackendKind::Rnnoise)};
 

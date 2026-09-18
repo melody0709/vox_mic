@@ -37,17 +37,22 @@ public:
             return false;
         }
 
-        std::string dpdfnetError;
-        const bool dpdfnetReady = m_dpdfnet.prepare(runtimeDirectory, modelPath,
-            static_cast<int>(sampleRate), 480, &dpdfnetError);
-        g_appState.dpdfnetAvailable.store(dpdfnetReady, std::memory_order_release);
+        // DPDFNet is NOT loaded here unless it is the selected backend. The
+        // payload is ~43 MB resident (onnxruntime plus a 10 MB model), measured
+        // by running the same binary with the payload renamed aside, and a
+        // RNNoise user must not pay for a backend they never chose.
+        //
+        // Loading allocates and blocks, so it can never happen on the render
+        // thread; anything after startup goes through requestDpdfnetLoad().
+        m_runtimeDirectory = runtimeDirectory;
+        m_modelPath = modelPath;
         g_appState.dpdfnetDegraded.store(false, std::memory_order_release);
-        if (!dpdfnetReady) {
-            if (dpdfnetError.empty()) dpdfnetError = m_dpdfnet.prepareError();
-            if (dpdfnetError.empty()) dpdfnetError = "unknown error";
-            printf("[DPDFNet] unavailable: %s\n", dpdfnetError.c_str());
+        if (g_appState.denoiseBackend.load(std::memory_order_acquire) ==
+            static_cast<int>(DenoiseBackendKind::Dpdfnet)) {
+            loadDpdfnetNow();  // startup: blocking here is fine, nothing plays yet
         } else {
-            printf("[DPDFNet] ready: 48 kHz / 480-sample online backend\n");
+            setDpdfnetLoadState(DpdfnetLoadState::NotLoaded);
+            printf("[DPDFNet] not loaded: backend is RNNoise (loads on demand)\n");
         }
 
         m_rnnoiseStrength = g_appState.nrStrength.load(std::memory_order_relaxed);
@@ -178,6 +183,31 @@ private:
     static constexpr unsigned int DPDFNET_WARMUP_UNDERFLOW_BLOCKS = 4;
     static constexpr unsigned int DPDFNET_STEADY_UNDERFLOW_BLOCKS = 3;
 
+    void setDpdfnetLoadState(DpdfnetLoadState state) {
+        g_appState.dpdfnetLoadState.store(static_cast<int>(state),
+            std::memory_order_release);
+        g_appState.dpdfnetAvailable.store(state == DpdfnetLoadState::Ready,
+            std::memory_order_release);
+    }
+
+    // Loads the runtime and creates the session. Allocates and blocks for
+    // hundreds of milliseconds, so it must never run on the render thread.
+    void loadDpdfnetNow() {
+        setDpdfnetLoadState(DpdfnetLoadState::Loading);
+        std::string dpdfnetError;
+        const bool ready = m_dpdfnet.prepare(m_runtimeDirectory, m_modelPath,
+            static_cast<int>(m_sampleRate), 480, &dpdfnetError);
+        if (ready) {
+            setDpdfnetLoadState(DpdfnetLoadState::Ready);
+            printf("[DPDFNet] ready: 48 kHz / 480-sample online backend\n");
+            return;
+        }
+        if (dpdfnetError.empty()) dpdfnetError = m_dpdfnet.prepareError();
+        if (dpdfnetError.empty()) dpdfnetError = "unknown error";
+        setDpdfnetLoadState(DpdfnetLoadState::Failed);
+        printf("[DPDFNet] unavailable: %s\n", dpdfnetError.c_str());
+    }
+
     DenoiseBackendKind chooseEffectiveBackend(int requested) const {
         if (requested == static_cast<int>(DenoiseBackendKind::Dpdfnet) &&
             m_dpdfnet.isReady() && !m_dpdfnetDegraded) {
@@ -304,6 +334,10 @@ private:
 
     DenoiseState* m_rnnoise = nullptr;
     DpdfnetProcessor m_dpdfnet;
+    // Kept so a later on-demand load can prepare without the caller having to
+    // pass them again.
+    std::wstring m_runtimeDirectory;
+    std::wstring m_modelPath;
     float m_sampleRate = 48000.0f;
     float m_rnnoiseStrength = 0.6f;
     bool m_nrActive = true;

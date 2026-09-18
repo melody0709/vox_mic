@@ -298,24 +298,33 @@ static COLORREF denoiseStatusColor(HWND hWnd) {
     if (!isChecked(hWnd, IDC_CHECK_NR)) return RGB(128, 128, 128);
 
     HWND combo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
-    const int selection = combo
-        ? (int)SendMessageA(combo, CB_GETCURSEL, 0, 0)
-        : 0;
+    const int selection = combo ? (int)SendMessageA(combo, CB_GETCURSEL, 0, 0) : 0;
+    const bool available = g_appState.dpdfnetAvailable.load(std::memory_order_acquire);
+    const bool effectiveIsDpdfnet =
+        g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 1;
+    const COLORREF active = RGB(30, 120, 54);
+    const COLORREF pending = RGB(45, 92, 150);
     if (selection == 1) {
-        if (g_appState.dpdfnetDegraded.load(std::memory_order_acquire) ||
-            !g_appState.dpdfnetAvailable.load(std::memory_order_acquire)) {
+        if (g_appState.dpdfnetDegraded.load(std::memory_order_acquire) || !available) {
             return RGB(168, 104, 24);
         }
-        if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
-            return RGB(30, 120, 54);
-        }
-        return RGB(45, 92, 150);
+        return effectiveIsDpdfnet ? active : pending;
     }
+    return effectiveIsDpdfnet ? pending : active;
+}
 
-    if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 0) {
-        return RGB(30, 120, 54);
-    }
-    return RGB(45, 92, 150);
+// Loading is on demand, so "unavailable" is the wrong word for the common case
+// where nothing has been loaded yet because RNNoise is selected. Only Failed is
+// a real problem.
+static const char* dpdfnetNotReadyText() {
+    const int s = g_appState.dpdfnetLoadState.load(std::memory_order_acquire);
+    if (s == static_cast<int>(DpdfnetLoadState::Loading))
+        return "DPDFNet is loading; audio uses RNNoise until it is ready.";
+    if (s == static_cast<int>(DpdfnetLoadState::Failed))
+        return "DPDFNet is unavailable; audio will use RNNoise fallback.";
+    if (s == static_cast<int>(DpdfnetLoadState::NotLoaded))
+        return "DPDFNet is not loaded; selecting it will load it on demand.";
+    return "DPDFNet is ready; it will take effect at the next audio block.";
 }
 
 static void updateDenoiseBackendUi(HWND hWnd) {
@@ -344,13 +353,12 @@ static void updateDenoiseBackendUi(HWND hWnd) {
     } else if (!selectionIsApplied) {
         statusText = g_appState.dpdfnetAvailable.load(std::memory_order_acquire)
             ? "DPDFNet is ready; it will take effect at the next audio block."
-            : "DPDFNet is unavailable; audio will use RNNoise fallback.";
+            : dpdfnetNotReadyText();
     } else if (g_appState.dpdfnetDegraded.load(std::memory_order_acquire)) {
         statusText =
             "DPDFNet was degraded to RNNoise after a worker stall; it will retry after the next stream reset.";
     } else if (!g_appState.dpdfnetAvailable.load(std::memory_order_acquire)) {
-        statusText =
-            "DPDFNet is unavailable; audio will use RNNoise until the runtime/model/session is available.";
+        statusText = dpdfnetNotReadyText();
     } else if (g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 1) {
         statusText = "DPDFNet is ready and selected.";
     } else {
