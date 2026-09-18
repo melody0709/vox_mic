@@ -121,6 +121,9 @@ void Layout::makeFonts() {
 }
 
 void Layout::destroyResources() {
+    for (const Item& it : m_items) {
+        if (it.hwnd) RemovePropW(it.hwnd, kRoleProperty);
+    }
     if (m_bodyFont) { DeleteObject(m_bodyFont); m_bodyFont = nullptr; }
     if (m_sectionFont) { DeleteObject(m_sectionFont); m_sectionFont = nullptr; }
     if (m_windowBrush) { DeleteObject(m_windowBrush); m_windowBrush = nullptr; }
@@ -276,6 +279,7 @@ void Layout::build(HWND parent, HINSTANCE instance) {
 
     resizeChrome();
     for (int p = 0; p < kPageCount; ++p) createPageContent(parent, instance, p);
+    createFooter(parent, instance);
     placeAll();
     showPage(0);
     m_ready = true;
@@ -329,9 +333,11 @@ void Layout::createChrome(HWND parent, HINSTANCE instance) {
         item.pszText = const_cast<LPSTR>(kPages[p].tabTitle);
         TabCtrl_InsertItem(m_tab, p, &item);
     }
+}
 
-    // Footer buttons. `slot` counts leftwards from the right edge; the leftmost
-    // button is wider because its caption is longer.
+void Layout::createFooter(HWND parent, HINSTANCE instance) {
+    // Footer buttons. Created after page content so the keyboard Tab key
+    // navigates naturally: Tab bar -> Page fields -> Footer buttons -> Tab bar.
     struct FooterBtn {
         int id;
         const char* text;
@@ -425,7 +431,7 @@ void Layout::createPageContent(HWND parent, HINSTANCE instance, int page) {
                     nullptr);
                 applyFont(box, m_bodyFont);
                 push(box, fld.id, cellX, lastRowY + ctrlOffset, metrics::ToggleColW,
-                     metrics::ToggleH, TextRole::Transparent, false);
+                     metrics::ToggleH, TextRole::Opaque, false);
                 continue;
             }
 
@@ -463,7 +469,10 @@ void Layout::createPageContent(HWND parent, HINSTANCE instance, int page) {
                         reinterpret_cast<HMENU>(static_cast<INT_PTR>(fld.id)),
                         instance, nullptr);
                     applyFont(box, m_bodyFont);
-                    push(box, fld.id, 0, y + ctrlOffset, metrics::ToggleColW,
+                    const bool sharesRow =
+                        (f + 1 < sec.count && sec.fields[f + 1].sameRowAsPrevious);
+                    push(box, fld.id, 0, y + ctrlOffset,
+                         sharesRow ? metrics::ToggleColW : metrics::ToggleW,
                          metrics::ToggleH, TextRole::Opaque, false);
                     break;
                 }

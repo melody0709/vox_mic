@@ -137,6 +137,16 @@ target_compile_options(mic_usage_toggle_probe PRIVATE
     /O2 /EHsc /W4 /WX- /utf-8)
 target_link_libraries(mic_usage_toggle_probe PRIVATE ole32 mmdevapi)
 
+add_executable(settings_tab_order_test
+    tests/settings_tab_order_test.cpp
+    src/settings_layout.cpp)
+target_include_directories(settings_tab_order_test PRIVATE src)
+target_compile_options(settings_tab_order_test PRIVATE
+    /O2 /EHsc /W4 /WX- /utf-8)
+target_link_libraries(settings_tab_order_test PRIVATE
+    user32 comctl32 gdi32)
+add_test(NAME settings_tab_order_test COMMAND settings_tab_order_test)
+
 if(VOXMIC_ENABLE_DPDFNET)
     add_executable(dpdfnet_smoke
         tests/dpdfnet_smoke.cpp

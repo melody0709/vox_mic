@@ -23,7 +23,6 @@ int scalePercent();
 
 // Design pixels -> physical pixels, rounded to nearest.
 int S(int design);
-
 // --- window / chrome ------------------------------------------------------
 
 constexpr int WinW = 560;
@@ -44,7 +43,7 @@ constexpr int PadPageX = 16;     // page edge -> content
 constexpr int PadPageY = 12;
 constexpr int ColLabelW = 110;   // left label column
 constexpr int GapLabelField = 10;
-constexpr int ColFieldX = PadPageX + ColLabelW + GapLabelField;
+constexpr int ColFieldX = ColLabelW + GapLabelField;
 
 constexpr int RowH = 30;         // one label+control row
 constexpr int CtrlH = 24;        // every interactive control is this tall
@@ -62,7 +61,8 @@ constexpr int SliderW = 260;
 constexpr int ValueW = 56;       // slider value label
 constexpr int GapFieldTrail = 8;
 constexpr int TrailW = 76;       // trailing action button, e.g. Refresh
-constexpr int ToggleColW = 260;  // a checkbox row can host two checkboxes
+constexpr int ToggleW = 360;     // full-width checkbox row
+constexpr int ToggleColW = 240;  // paired checkboxes (240 * 2 <= 488)
 
 // --- typography -----------------------------------------------------------
 

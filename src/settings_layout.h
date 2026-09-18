@@ -101,6 +101,7 @@ private:
              bool anchoredBottom, bool fillPage = false);
     void attachField(int fieldId, HWND hwnd);
     void createChrome(HWND parent, HINSTANCE instance);
+    void createFooter(HWND parent, HINSTANCE instance);
     void createPageContent(HWND parent, HINSTANCE instance, int page);
     void resizeChrome();
     void footerButtonRect(int slot, int width, bool anchoredRight, RECT& out) const;

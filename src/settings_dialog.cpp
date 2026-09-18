@@ -166,6 +166,27 @@ static void markSettingsDirty(HWND hWnd) {
     setSettingsDirty(hWnd, true);
 }
 
+// The settings UI has two pages, and both are described entirely by the field
+// table, so nothing walks a hand-written list of controls.
+template <typename Fn>
+static void forEachFieldOnPage(int pageIndex, Fn&& fn) {
+    if (pageIndex < 0 || pageIndex >= settings::kPageCount) return;
+    const settings::PageSpec& page = settings::kPages[pageIndex];
+    for (int s = 0; s < page.count; ++s) {
+        const settings::SectionSpec& section = page.sections[s];
+        for (int f = 0; f < section.count; ++f) {
+            fn(section.fields[f]);
+        }
+    }
+}
+
+template <typename Fn>
+static void forEachField(Fn&& fn) {
+    for (int p = 0; p < settings::kPageCount; ++p) {
+        forEachFieldOnPage(p, fn);
+    }
+}
+
 // Applies every `dependsOn` relation declared in the field table, so a new
 // "X off disables Y" rule is one field-table entry rather than a new branch
 // here. Two relations the table cannot express are handled after the loop.
@@ -174,20 +195,13 @@ static void updateDspControlStates(HWND hWnd) {
         hWnd, GWLP_USERDATA);
     if (!pData) return;
 
-    for (int p = 0; p < settings::kPageCount; ++p) {
-        const settings::PageSpec& page = settings::kPages[p];
-        for (int s = 0; s < page.count; ++s) {
-            const settings::SectionSpec& section = page.sections[s];
-            for (int f = 0; f < section.count; ++f) {
-                const settings::FieldSpec& field = section.fields[f];
-                if (!field.gated()) continue;
-                const bool on = isChecked(hWnd, field.dependsOn);
-                for (HWND control : pData->layout.fieldWidgets(field.id)) {
-                    setControlEnabledIfChanged(control, on);
-                }
-            }
+    forEachField([&](const settings::FieldSpec& field) {
+        if (!field.gated()) return;
+        const bool on = isChecked(hWnd, field.dependsOn);
+        for (HWND control : pData->layout.fieldWidgets(field.id)) {
+            setControlEnabledIfChanged(control, on);
         }
-    }
+    });
 
     // The selected backend gates NR strength too, and that is not a plain
     // toggle dependency: strength only applies when RNNoise is selected.
@@ -197,10 +211,11 @@ static void updateDspControlStates(HWND hWnd) {
         : 0;
     const bool nrEnabled = isChecked(hWnd, IDC_CHECK_NR);
     const bool nrStrengthEnabled = nrEnabled && selection != 1;
-    setControlEnabledIfChanged(
-        GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), nrStrengthEnabled);
-    setControlEnabledIfChanged(
-        GetDlgItem(hWnd, IDC_LABEL_NRSTR), nrStrengthEnabled);
+    for (HWND control : pData->layout.fieldWidgets(IDC_TRACKBAR_NRSTR)) {
+        if (control != pData->hNrStrengthHint) {
+            setControlEnabledIfChanged(control, nrStrengthEnabled);
+        }
+    }
 
     if (pData->hNrStrengthHint) {
         const char* hint = !nrEnabled
@@ -355,33 +370,6 @@ static void updateDenoiseBackendUi(HWND hWnd) {
     }
 
     updateProcessingChainUi(hWnd);
-}
-
-// The settings UI has two pages, and both are described entirely by the field
-// table, so nothing below walks a hand-written list of controls.
-template <typename Fn>
-static void forEachField(Fn&& fn) {
-    for (int p = 0; p < settings::kPageCount; ++p) {
-        const settings::PageSpec& page = settings::kPages[p];
-        for (int s = 0; s < page.count; ++s) {
-            const settings::SectionSpec& section = page.sections[s];
-            for (int f = 0; f < section.count; ++f) {
-                fn(section.fields[f]);
-            }
-        }
-    }
-}
-
-template <typename Fn>
-static void forEachFieldOnPage(int pageIndex, Fn&& fn) {
-    if (pageIndex < 0 || pageIndex >= settings::kPageCount) return;
-    const settings::PageSpec& page = settings::kPages[pageIndex];
-    for (int s = 0; s < page.count; ++s) {
-        const settings::SectionSpec& section = page.sections[s];
-        for (int f = 0; f < section.count; ++f) {
-            fn(section.fields[f]);
-        }
-    }
 }
 
 // Slider positions are trackbar units; the config value is position * scale, so
@@ -555,6 +543,11 @@ static void saveDspUiToConfig(HWND hWnd, Config* cfg) {
     if (!cfg) return;
     forEachFieldOnPage(1, [&](const settings::FieldSpec& field) {
         writeFieldToConfig(hWnd, field, cfg, false);
+    });
+    forEachFieldOnPage(0, [&](const settings::FieldSpec& field) {
+        if (field.id == IDC_TRACKBAR_GAIN) {
+            writeFieldToConfig(hWnd, field, cfg, false);
+        }
     });
 }
 
@@ -864,6 +857,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             if (pData) {
                 beginSettingsEdit(hWnd);
                 pData->layout.showPage(selectedTab == 1 ? 1 : 0);
+                SetFocus(GetDlgItem(hWnd, IDC_TAB_MAIN));
             }
             refreshStartupRegistrationControl(hWnd);
             updateDenoiseBackendUi(hWnd);
@@ -951,10 +945,10 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             pData && pData->layout.panelBrush()
                 ? theme::Panel
                 : GetSysColor(COLOR_BTNFACE));
-        SetTextColor(hdc, role == settings::TextRole::Hint
-                              ? hintTextColor(pData)
-                              : (IsWindowEnabled(hCtrl) ? labelTextColor(pData)
-                                                        : disabledTextColor(pData)));
+        SetTextColor(hdc, !IsWindowEnabled(hCtrl)
+                              ? disabledTextColor(pData)
+                              : (role == settings::TextRole::Hint ? hintTextColor(pData)
+                                                                  : labelTextColor(pData)));
         if (pData && pData->layout.panelBrush()) {
             return (LRESULT)pData->layout.panelBrush();
         }
@@ -1063,31 +1057,36 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         WORD notify = HIWORD(wParam);
         HWND hCombo = GetDlgItem(hWnd, IDC_COMBO_DEVICE);
 
-        const bool dspToggle = id == IDC_CHECK_EQ ||
-            id == IDC_CHECK_COMP || id == IDC_CHECK_NR;
-        const bool generalToggle = id == IDC_CHECK_NS ||
-            id == IDC_CHECK_AEC || id == IDC_CHECK_AGC ||
-            id == IDC_CHECK_DEBUG || id == IDC_CHECK_STARTUP;
-        const bool comboChanged = id == IDC_COMBO_DEVICE ||
-            id == IDC_COMBO_ANDROID_APP || id == IDC_COMBO_NR_BACKEND;
-        const bool editChanged = id == IDC_HOST_EDIT || id == IDC_PORT_EDIT;
-
-        if ((dspToggle || generalToggle) && notify == BN_CLICKED) {
-            markSettingsDirty(hWnd);
-            if (dspToggle) applyDspPreviewFromUi(hWnd);
-        } else if (comboChanged && notify == CBN_SELCHANGE) {
-            markSettingsDirty(hWnd);
-            if (id == IDC_COMBO_NR_BACKEND) applyDspPreviewFromUi(hWnd);
-        } else if (editChanged && notify == EN_CHANGE) {
-            markSettingsDirty(hWnd);
+        int fieldPage = -1;
+        const settings::FieldSpec* pField = nullptr;
+        for (int p = 0; p < settings::kPageCount && !pField; ++p) {
+            forEachFieldOnPage(p, [&](const settings::FieldSpec& f) {
+                if (f.id == id) {
+                    pField = &f;
+                    fieldPage = p;
+                }
+            });
+        }
+        if (pField) {
+            if (pField->kind == settings::FieldKind::Toggle && notify == BN_CLICKED) {
+                markSettingsDirty(hWnd);
+                if (fieldPage == 1) applyDspPreviewFromUi(hWnd);
+            } else if (pField->kind == settings::FieldKind::Choice && notify == CBN_SELCHANGE) {
+                markSettingsDirty(hWnd);
+                if (id == IDC_COMBO_NR_BACKEND) {
+                    updateDenoiseBackendUi(hWnd);
+                    applyDspPreviewFromUi(hWnd);
+                }
+            } else if ((pField->kind == settings::FieldKind::Text ||
+                        pField->kind == settings::FieldKind::Number) &&
+                       notify == EN_CHANGE) {
+                markSettingsDirty(hWnd);
+            }
         }
 
         switch (id) {
         case IDC_BTN_REFRESH:
             refreshDeviceList(hCombo, pData->pConfig->serial);
-            break;
-        case IDC_COMBO_NR_BACKEND:
-            if (notify == CBN_SELCHANGE) updateDenoiseBackendUi(hWnd);
             break;
         case IDC_BTN_RESET: {
             Config defaultCfg;
@@ -1100,6 +1099,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         case IDC_BTN_APPLY:
             commitSettings(hWnd);
             break;
+        case IDOK:
         case IDC_BTN_OK: {
             if (commitSettings(hWnd)) ShowWindow(hWnd, SW_HIDE);
             break;
