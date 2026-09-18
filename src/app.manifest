@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!--
+    VoxMic application manifest.
+
+    Two declarations here are load-bearing - dropping either one silently
+    degrades the whole UI, with no build error and no runtime error:
+
+    1. Microsoft.Windows.Common-Controls 6.0.0.0
+       Without this side-by-side dependency the process binds comctl32 v5.82,
+       which does not use visual styles. Every common control (tab, trackbar,
+       combo box, checkbox) is then painted in the classic Windows 95 style.
+
+    2. dpiAwareness = PerMonitorV2
+       Without it the process is DPI-unaware, so Windows runs it at a virtual
+       96 DPI and bitmap-stretches the result on any display scaled above
+       100%. Text and borders come out blurry.
+
+    Wiring: this file is embedded as an RT_MANIFEST resource by src/voxmic.rc,
+    and the linker's own default manifest is suppressed with /MANIFEST:NO in
+    CMakeLists.txt. Because that default is gone, requestedExecutionLevel must
+    stay declared below: a manifest with no requestedExecutionLevel makes
+    Windows apply installer-detection heuristics to the process.
+
+    Note on assemblyIdentity/version: that is the side-by-side identity, not
+    the product version. The product version has exactly one source of truth,
+    src/version.h (APP_VERSION), and is deliberately not duplicated here - the
+    assembly has no dependents that could care.
+  -->
+  <assemblyIdentity
+      type="win32"
+      name="VoxMic"
+      version="1.0.0.0"
+      processorArchitecture="*" />
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and later. PerMonitorV2 (1703+) and GetDpiForWindow
+           (1607+) are both Windows 10 APIs, so claiming anything older would
+           be claiming support we neither test nor have. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+      <!-- Fallback for hosts that ignore the 2016 element. -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+    </windowsSettings>
+  </application>
+
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+          type="win32"
+          name="Microsoft.Windows.Common-Controls"
+          version="6.0.0.0"
+          processorArchitecture="*"
+          publicKeyToken="6595b64144ccf1df"
+          language="*" />
+    </dependentAssembly>
+  </dependency>
+</assembly>

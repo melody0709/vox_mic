@@ -78,6 +78,7 @@ add_executable(voxmic WIN32
     src/tray_icon.cpp
     src/config.cpp
     src/settings_dialog.cpp
+    src/settings_layout.cpp
     src/mic_usage_monitor.cpp
     src/startup_registration.cpp
     src/runtime_paths.cpp
@@ -111,8 +112,12 @@ target_compile_options(voxmic PRIVATE
     /O2 /EHsc /W4 /WX- /wd4305 /wd4244 /utf-8)
 
 # /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup（无控制台窗口的 main 入口）
+# /MANIFEST:NO 关掉链接器自动生成的默认 manifest，改由 src/voxmic.rc 把
+#   src/app.manifest 以 RT_MANIFEST 资源嵌进镜像。默认 manifest 只带 UAC 段，
+#   缺 Common-Controls v6 与 PerMonitorV2，会让控件退回 Win95 外观、界面在
+#   非 100% 缩放下被系统位图拉伸。两者必须成对存在，删一个即失效。
 set_target_properties(voxmic PROPERTIES
-    LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+    LINK_FLAGS "/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup /MANIFEST:NO")
 
 target_link_libraries(voxmic PRIVATE
     ws2_32 ole32 mmdevapi shell32 advapi32 comctl32 gdi32)

@@ -42,9 +42,18 @@ $CMake = Join-Path $Root 'CMakeLists.txt'
 #     responsibilities, not file-splitting for its own sake. The remaining ~33
 #     over the pre-B2 728 is the abandoned-worker handling, accepted explicitly
 #     here since nothing repays it now that B5 is cancelled.
+#   settings_dialog.cpp - PAID BACK. 1458 -> 1188 by moving all geometry into
+#     the metrics table and the layout engine, and all field plumbing into the
+#     field table. The remaining growth risk now lives in the new files below,
+#     so they get baselines of their own instead of being unpoliced.
 $LineBaselines = @{
     'AGENTS.md'                     = 145   # loaded in full every session; keep it a rule sheet, not a manual
-    'src/settings_dialog.cpp'       = 1458
+    'src/settings_dialog.cpp'       = 1188
+    'src/settings_layout.cpp'       = 621   # layout engine: the only place a coordinate is computed
+    'src/settings_layout.h'         = 122
+    'src/settings_fields.h'         = 231   # the field table: one row per option
+    'src/settings_metrics.h'        = 77    # every size, gap and font height
+    'src/settings_control_ids.h'    = 45
     'src/main.cpp'                  = 650   # pre-B2 value; actual 650, at the line
     'src/mic_usage_monitor.cpp'     = 652
     'src/dsp/dpdfnet_processor.cpp' = 761   # pre-B2: 728; 33 lines of accepted debt

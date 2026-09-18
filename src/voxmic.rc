@@ -4,3 +4,10 @@ IDI_ICON1 ICON "voxmic.ico"
 IDI_ICON_IDLE ICON "voxmic_idle.ico"
 IDI_ICON_CONNECTED ICON "voxmic_connected.ico"
 IDI_ICON_STREAMING ICON "voxmic_streaming.ico"
+
+// Application manifest. Resource type 24 = RT_MANIFEST, id 1 =
+// CREATEPROCESS_MANIFEST_RESOURCE_ID (numeric rather than the winuser.h names
+// so rc.exe resolves them without pulling in a header it does not include).
+// Paired with /MANIFEST:NO in CMakeLists.txt, which suppresses the linker's
+// own default manifest so this one is the only one in the image.
+1 24 "app.manifest"

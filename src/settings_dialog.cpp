@@ -1,70 +1,36 @@
 #include "settings_dialog.h"
-#include "adb_control.h"
-#include "tray_icon.h"
-#include "startup_registration.h"
+
+#include <commctrl.h>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
-#include <commctrl.h>
-#include <atomic>
 
+#include "adb_control.h"
 #include "app_state.h"
+#include "settings_control_ids.h"
+#include "settings_fields.h"
+#include "settings_layout.h"
+#include "settings_metrics.h"
+#include "startup_registration.h"
+#include "tray_icon.h"
 
 #define SETTINGS_CLASS "VoxMicSettingsClass"
-#define IDC_COMBO_DEVICE      2001
-#define IDC_HOST_EDIT         2002
-#define IDC_PORT_EDIT         2003
-#define IDC_BTN_REFRESH       2004
-#define IDC_BTN_OK            2005
-#define IDC_BTN_CANCEL        2006
-#define IDC_COMBO_ANDROID_APP 2007
-#define IDC_TRACKBAR_GAIN     2008
-#define IDC_LABEL_GAIN        2009
-#define IDC_CHECK_NS          2010
-#define IDC_CHECK_AEC         2011
-#define IDC_CHECK_AGC         2012
-#define IDC_CHECK_EQ          2013
-#define IDC_TRACKBAR_PRES     2014
-#define IDC_LABEL_PRES        2015
-#define IDC_TRACKBAR_BASS     2016
-#define IDC_LABEL_BASS        2017
-#define IDC_CHECK_COMP        2018
-#define IDC_CHECK_NR          2019
-#define IDC_TAB_MAIN          2020
-#define IDC_BTN_RESET         2021
-#define IDC_CHECK_DEBUG       2022
-#define IDC_TRACKBAR_NRSTR    2023
-#define IDC_LABEL_NRSTR       2024
-#define IDC_CHECK_STARTUP     2025
-#define IDC_LABEL_STARTUP_HINT 2026
-#define IDC_COMBO_NR_BACKEND  2027
-#define IDC_LABEL_NR_BACKEND_STATUS 2028
-#define IDC_BTN_APPLY         2029
-#define IDC_LABEL_DSP_CHAIN_STATUS 2031
-#define IDC_LABEL_COMP_HINT   2032
-#define ID_TIMER_BACKEND_STATUS 2
 
 struct SettingsDialogData {
-    Config* pConfig;
+    Config* pConfig = nullptr;
     Config editBaseConfig;
     bool hasEditBase = false;
     bool dirty = false;
-    HWND hTab;
+    settings::Layout layout;
     HWND hApply = nullptr;
     HWND hDeviceCombo = nullptr;
     HWND hAndroidAppCombo = nullptr;
     HWND hNrBackendCombo = nullptr;
     HWND hDspChainStatus = nullptr;
     HWND hNrStrengthHint = nullptr;
-    std::vector<HWND> tabGeneralControls;
-    std::vector<HWND> tabDspControls;
-    std::vector<HWND> hintControls;
-    std::vector<HWND> eqDependentControls;
-    std::vector<HWND> nrDependentControls;
-    HFONT hHintFont;
-    HFONT hSectionFont;
     HBRUSH hInputBrush = nullptr;
     bool useSystemInputColors = false;
 };
@@ -137,30 +103,6 @@ static void selectDeviceInList(HWND hCombo, const std::string& currentSerial) {
     SendMessageA(hCombo, CB_SETCURSEL, (WPARAM)selection, 0);
 }
 
-static void updatePresLabel(HWND hWnd) {
-    int pos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
-    float val = (float)pos / 10.0f;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "+%.1f dB", val);
-    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_PRES), buf);
-}
-
-static void updateBassLabel(HWND hWnd) {
-    int pos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
-    float val = -(float)pos / 10.0f;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.1f dB", val);
-    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_BASS), buf);
-}
-
-static void updateNrStrLabel(HWND hWnd) {
-    int pos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_GETPOS, 0, 0);
-    float val = (float)pos / 100.0f;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%.2f", val);
-    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_NRSTR), buf);
-}
-
 static bool isChecked(HWND hWnd, int controlId) {
     return SendMessageA(GetDlgItem(hWnd, controlId), BM_GETCHECK, 0, 0) == BST_CHECKED;
 }
@@ -208,25 +150,36 @@ static void markSettingsDirty(HWND hWnd) {
     setSettingsDirty(hWnd, true);
 }
 
+// Applies every `dependsOn` relation declared in the field table, so a new
+// "X off disables Y" rule is one field-table entry rather than a new branch
+// here. Two relations the table cannot express are handled after the loop.
 static void updateDspControlStates(HWND hWnd) {
     SettingsDialogData* pData = (SettingsDialogData*)GetWindowLongPtrA(
         hWnd, GWLP_USERDATA);
     if (!pData) return;
 
-    const bool eqEnabled = isChecked(hWnd, IDC_CHECK_EQ);
-    for (HWND control : pData->eqDependentControls) {
-        setControlEnabledIfChanged(control, eqEnabled);
+    for (int p = 0; p < settings::kPageCount; ++p) {
+        const settings::PageSpec& page = settings::kPages[p];
+        for (int s = 0; s < page.count; ++s) {
+            const settings::SectionSpec& section = page.sections[s];
+            for (int f = 0; f < section.count; ++f) {
+                const settings::FieldSpec& field = section.fields[f];
+                if (!field.gated()) continue;
+                const bool on = isChecked(hWnd, field.dependsOn);
+                for (HWND control : pData->layout.fieldWidgets(field.id)) {
+                    setControlEnabledIfChanged(control, on);
+                }
+            }
+        }
     }
 
-    const bool nrEnabled = isChecked(hWnd, IDC_CHECK_NR);
-    for (HWND control : pData->nrDependentControls) {
-        setControlEnabledIfChanged(control, nrEnabled);
-    }
-
+    // The selected backend gates NR strength too, and that is not a plain
+    // toggle dependency: strength only applies when RNNoise is selected.
     HWND backendCombo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
     const int selection = backendCombo
         ? (int)SendMessageA(backendCombo, CB_GETCURSEL, 0, 0)
         : 0;
+    const bool nrEnabled = isChecked(hWnd, IDC_CHECK_NR);
     const bool nrStrengthEnabled = nrEnabled && selection != 1;
     setControlEnabledIfChanged(
         GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), nrStrengthEnabled);
@@ -387,176 +340,239 @@ static void updateDenoiseBackendUi(HWND hWnd) {
     updateProcessingChainUi(hWnd);
 }
 
-static void showTabControls(const SettingsDialogData* pData, int tabIndex) {
-    int swGen = (tabIndex == 0) ? SW_SHOW : SW_HIDE;
-    int swDsp = (tabIndex == 1) ? SW_SHOW : SW_HIDE;
-    for (HWND h : pData->tabGeneralControls) {
-        ShowWindow(h, swGen);
-    }
-    for (HWND h : pData->tabDspControls) {
-        ShowWindow(h, swDsp);
+// The settings UI has two pages, and both are described entirely by the field
+// table, so nothing below walks a hand-written list of controls.
+template <typename Fn>
+static void forEachField(Fn&& fn) {
+    for (int p = 0; p < settings::kPageCount; ++p) {
+        const settings::PageSpec& page = settings::kPages[p];
+        for (int s = 0; s < page.count; ++s) {
+            const settings::SectionSpec& section = page.sections[s];
+            for (int f = 0; f < section.count; ++f) {
+                fn(section.fields[f]);
+            }
+        }
     }
 }
 
-static void loadDspUiFromConfig(HWND hWnd, const Config* cfg) {
-    int gainPos = (int)(cfg->gain * 100.0f);
-    if (gainPos < 25) gainPos = 25;
-    if (gainPos > 400) gainPos = 400;
-    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_GAIN), TBM_SETPOS, TRUE, gainPos);
-
-    char gainText[32];
-    snprintf(gainText, sizeof(gainText), "%.2fx", cfg->gain);
-    SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_GAIN), gainText);
-
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_EQ), BM_SETCHECK,
-        cfg->eqEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-
-    int presPos = (int)(cfg->eqPresence * 10.0f);
-    if (presPos < 0) presPos = 0;
-    if (presPos > 80) presPos = 80;
-    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_SETPOS, TRUE, presPos);
-    updatePresLabel(hWnd);
-
-    int bassPos = (int)(-cfg->eqBassCut * 10.0f);
-    if (bassPos < 0) bassPos = 0;
-    if (bassPos > 60) bassPos = 60;
-    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_SETPOS, TRUE, bassPos);
-    updateBassLabel(hWnd);
-
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_COMP), BM_SETCHECK,
-        cfg->compressorEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NR), BM_SETCHECK,
-        cfg->nrEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-
-    int nrPos = (int)(cfg->nrStrength * 100.0f);
-    if (nrPos < 30) nrPos = 30;
-    if (nrPos > 95) nrPos = 95;
-    SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_SETPOS, TRUE, nrPos);
-    updateNrStrLabel(hWnd);
-
-    HWND backendCombo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
-    if (backendCombo) {
-        const int backend = (_stricmp(cfg->denoiseBackend.c_str(), "dpdfnet") == 0) ? 1 : 0;
-        SendMessageA(backendCombo, CB_SETCURSEL, (WPARAM)backend, 0);
+template <typename Fn>
+static void forEachFieldOnPage(int pageIndex, Fn&& fn) {
+    if (pageIndex < 0 || pageIndex >= settings::kPageCount) return;
+    const settings::PageSpec& page = settings::kPages[pageIndex];
+    for (int s = 0; s < page.count; ++s) {
+        const settings::SectionSpec& section = page.sections[s];
+        for (int f = 0; f < section.count; ++f) {
+            fn(section.fields[f]);
+        }
     }
+}
+
+// Slider positions are trackbar units; the config value is position * scale, so
+// the label is formatted from the config value and never from the raw position.
+static void updateSliderLabel(HWND hWnd, const settings::FieldSpec& field) {
+    if (!field.valueId) return;
+    HWND track = GetDlgItem(hWnd, field.id);
+    if (!track) return;
+    const int pos = (int)SendMessageA(track, TBM_GETPOS, 0, 0);
+    char buf[32];
+    snprintf(buf, sizeof(buf), field.slider.fmt,
+             static_cast<double>(pos * field.slider.scale));
+    SetWindowTextA(GetDlgItem(hWnd, field.valueId), buf);
+}
+
+static void loadAllUiFromConfig(HWND hWnd, const Config* cfg) {
+    if (!cfg) return;
+
+    forEachField([&](const settings::FieldSpec& field) {
+        // Every binding test also checks that the table row actually names a
+        // target: the table is edited by hand, and a row that forgets its
+        // binding must be a no-op, not a null member pointer dereference.
+        switch (field.kind) {
+            case settings::FieldKind::Toggle:
+                if (field.bind == settings::Bind::Bool && field.bBool) {
+                    SendMessageA(GetDlgItem(hWnd, field.id), BM_SETCHECK,
+                                 (cfg->*field.bBool) ? BST_CHECKED : BST_UNCHECKED,
+                                 0);
+                }
+                break;
+            case settings::FieldKind::Text:
+                if (field.bind == settings::Bind::Str && field.bStr) {
+                    setControlTextIfChanged(GetDlgItem(hWnd, field.id),
+                                            (cfg->*field.bStr).c_str());
+                }
+                break;
+            case settings::FieldKind::Number:
+                if (field.bind == settings::Bind::Int && field.bInt) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d", cfg->*field.bInt);
+                    setControlTextIfChanged(GetDlgItem(hWnd, field.id), buf);
+                }
+                break;
+            case settings::FieldKind::Slider:
+                if (field.bind == settings::Bind::Float && field.bFloat) {
+                    const float value = cfg->*field.bFloat;
+                    const float scaled = (field.slider.scale != 0.0f)
+                                             ? value / field.slider.scale
+                                             : 0.0f;
+                    int pos = (int)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
+                    if (pos < field.slider.min) pos = field.slider.min;
+                    if (pos > field.slider.max) pos = field.slider.max;
+                    SendMessageA(GetDlgItem(hWnd, field.id), TBM_SETPOS, TRUE, pos);
+                    updateSliderLabel(hWnd, field);
+                }
+                break;
+            case settings::FieldKind::Choice: {
+                HWND combo = GetDlgItem(hWnd, field.id);
+                if (!combo) break;
+                if (field.bind == settings::Bind::Int && field.bInt) {
+                    int sel = cfg->*field.bInt;
+                    if (sel < 0 || (field.optionCount > 0 && sel >= field.optionCount)) {
+                        sel = 0;
+                    }
+                    SendMessageA(combo, CB_SETCURSEL, (WPARAM)sel, 0);
+                } else if (field.bind == settings::Bind::StrEnum && field.bStr &&
+                           field.enumValues) {
+                    const std::string& value = cfg->*field.bStr;
+                    int sel = 0;
+                    for (int i = 0; i < field.enumCount; ++i) {
+                        if (_stricmp(value.c_str(), field.enumValues[i]) == 0) {
+                            sel = i;
+                            break;
+                        }
+                    }
+                    SendMessageA(combo, CB_SETCURSEL, (WPARAM)sel, 0);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    });
+
+    // The device list is filled from `adb devices` at runtime, so it is selected
+    // by serial instead of by index.
+    selectDeviceInList(GetDlgItem(hWnd, IDC_COMBO_DEVICE), cfg->serial);
 
     updateDspControlStates(hWnd);
     updateDenoiseBackendUi(hWnd);
 }
 
-static void loadGeneralUiFromConfig(HWND hWnd, const Config* cfg) {
-    if (!cfg) return;
-
-    selectDeviceInList(GetDlgItem(hWnd, IDC_COMBO_DEVICE), cfg->serial);
-
-    char buf[256];
-    setControlTextIfChanged(GetDlgItem(hWnd, IDC_HOST_EDIT), cfg->host.c_str());
-    snprintf(buf, sizeof(buf), "%d", cfg->port);
-    setControlTextIfChanged(GetDlgItem(hWnd, IDC_PORT_EDIT), buf);
-
-    HWND hAppCombo = GetDlgItem(hWnd, IDC_COMBO_ANDROID_APP);
-    if (hAppCombo) {
-        int appSel = cfg->androidAppPreset;
-        if (appSel < 0 || appSel > 1) appSel = 0;
-        SendMessageA(hAppCombo, CB_SETCURSEL, (WPARAM)appSel, 0);
+// Writes one field's current value into cfg. With `validate` set, a Number field
+// outside its declared range reports to the user and returns false; without it
+// the value is clamped silently, which is what the live preview path needs
+// because it runs on every slider drag.
+static bool writeFieldToConfig(HWND hWnd, const settings::FieldSpec& field,
+                               Config* cfg, bool validate) {
+    // Each binding test also checks the table row named a target; see the note
+    // in loadAllUiFromConfig.
+    switch (field.kind) {
+        case settings::FieldKind::Toggle:
+            if (field.bind == settings::Bind::Bool && field.bBool) {
+                cfg->*field.bBool = isChecked(hWnd, field.id);
+            }
+            break;
+        case settings::FieldKind::Text:
+            if (field.bind == settings::Bind::Str && field.bStr) {
+                char buf[256] = {};
+                GetWindowTextA(GetDlgItem(hWnd, field.id), buf,
+                               static_cast<int>(sizeof(buf)));
+                cfg->*field.bStr = buf;
+            }
+            break;
+        case settings::FieldKind::Number:
+            if (field.bind == settings::Bind::Int && field.bInt) {
+                char buf[64] = {};
+                HWND edit = GetDlgItem(hWnd, field.id);
+                GetWindowTextA(edit, buf, static_cast<int>(sizeof(buf)));
+                char* end = nullptr;
+                const long parsed = std::strtol(buf, &end, 10);
+                const bool inRange = buf[0] != '\0' && end != buf && *end == '\0' &&
+                                     parsed >= field.intMin && parsed <= field.intMax;
+                if (!inRange) {
+                    if (!validate) return false;
+                    char message[256];
+                    snprintf(message, sizeof(message),
+                             "%s must be an integer from %d to %d.",
+                             field.label ? field.label : "This field",
+                             field.intMin, field.intMax);
+                    MessageBoxA(hWnd, message, "VoxMic - Settings",
+                                MB_OK | MB_ICONWARNING);
+                    SetFocus(edit);
+                    SendMessageA(edit, EM_SETSEL, 0, -1);
+                    return false;
+                }
+                cfg->*field.bInt = static_cast<int>(parsed);
+            }
+            break;
+        case settings::FieldKind::Slider:
+            if (field.bind == settings::Bind::Float && field.bFloat) {
+                const int pos = (int)SendMessageA(GetDlgItem(hWnd, field.id),
+                                                  TBM_GETPOS, 0, 0);
+                float value = pos * field.slider.scale;
+                if (value < field.slider.lo) value = field.slider.lo;
+                if (value > field.slider.hi) value = field.slider.hi;
+                cfg->*field.bFloat = value;
+            }
+            break;
+        case settings::FieldKind::Choice: {
+            HWND combo = GetDlgItem(hWnd, field.id);
+            const int sel =
+                combo ? (int)SendMessageA(combo, CB_GETCURSEL, 0, 0) : 0;
+            if (field.bind == settings::Bind::Int && field.bInt) {
+                cfg->*field.bInt = sel;
+            } else if (field.bind == settings::Bind::StrEnum && field.bStr &&
+                       field.enumValues) {
+                cfg->*field.bStr = (sel >= 0 && sel < field.enumCount)
+                                       ? field.enumValues[sel]
+                                       : "";
+            }
+            break;
+        }
+        default:
+            break;
     }
-
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_SETCHECK,
-        cfg->nsEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_SETCHECK,
-        cfg->aecEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_SETCHECK,
-        cfg->agcEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
-    SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_SETCHECK,
-        cfg->debugConsole ? BST_CHECKED : BST_UNCHECKED, 0);
-}
-
-static void loadAllUiFromConfig(HWND hWnd, const Config* cfg) {
-    if (!cfg) return;
-    loadGeneralUiFromConfig(hWnd, cfg);
-    loadDspUiFromConfig(hWnd, cfg);
+    return true;
 }
 
 static void saveDspUiToConfig(HWND hWnd, Config* cfg) {
-    int gainPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_GAIN), TBM_GETPOS, 0, 0);
-    cfg->gain = (float)gainPos / 100.0f;
-    if (cfg->gain < 0.25f) cfg->gain = 0.25f;
-    if (cfg->gain > 4.0f) cfg->gain = 4.0f;
-
-    cfg->eqEnabled = isChecked(hWnd, IDC_CHECK_EQ);
-    int presPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_PRES), TBM_GETPOS, 0, 0);
-    cfg->eqPresence = (float)presPos / 10.0f;
-    if (cfg->eqPresence < 0.0f) cfg->eqPresence = 0.0f;
-    if (cfg->eqPresence > 8.0f) cfg->eqPresence = 8.0f;
-
-    int bassPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_BASS), TBM_GETPOS, 0, 0);
-    cfg->eqBassCut = -(float)bassPos / 10.0f;
-    if (cfg->eqBassCut < -6.0f) cfg->eqBassCut = -6.0f;
-    if (cfg->eqBassCut > 0.0f) cfg->eqBassCut = 0.0f;
-
-    cfg->compressorEnabled = isChecked(hWnd, IDC_CHECK_COMP);
-    cfg->nrEnabled = isChecked(hWnd, IDC_CHECK_NR);
-
-    int nrPos = (int)SendMessageA(GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR), TBM_GETPOS, 0, 0);
-    cfg->nrStrength = (float)nrPos / 100.0f;
-    if (cfg->nrStrength < 0.3f) cfg->nrStrength = 0.3f;
-    if (cfg->nrStrength > 0.95f) cfg->nrStrength = 0.95f;
-
-    HWND backendCombo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
-    const int backend = backendCombo
-        ? (int)SendMessageA(backendCombo, CB_GETCURSEL, 0, 0)
-        : 0;
-    cfg->denoiseBackend = (backend == 1) ? "dpdfnet" : "rnnoise";
+    if (!cfg) return;
+    forEachFieldOnPage(1, [&](const settings::FieldSpec& field) {
+        writeFieldToConfig(hWnd, field, cfg, false);
+    });
 }
 
 static bool saveUiToConfig(HWND hWnd, Config* cfg) {
-    char buf[256];
-    int idx = (int)SendMessageA(GetDlgItem(hWnd, IDC_COMBO_DEVICE), CB_GETCURSEL, 0, 0);
-    if (idx <= 0) {
-        cfg->serial = "";
+    if (!cfg) return false;
+
+    bool ok = true;
+    forEachField([&](const settings::FieldSpec& field) {
+        if (!ok) return;
+        if (!writeFieldToConfig(hWnd, field, cfg, true)) ok = false;
+    });
+    if (!ok) return false;
+
+    // The device serial is not a config value the user types: it is whichever
+    // entry of the runtime-populated device list is selected.
+    char buf[256] = {};
+    const int deviceIdx = (int)SendMessageA(GetDlgItem(hWnd, IDC_COMBO_DEVICE),
+                                            CB_GETCURSEL, 0, 0);
+    if (deviceIdx <= 0) {
+        cfg->serial.clear();
     } else {
-        SendMessageA(GetDlgItem(hWnd, IDC_COMBO_DEVICE), CB_GETLBTEXT, (WPARAM)idx, (LPARAM)buf);
+        SendMessageA(GetDlgItem(hWnd, IDC_COMBO_DEVICE), CB_GETLBTEXT,
+                     (WPARAM)deviceIdx, (LPARAM)buf);
         cfg->serial = buf;
     }
-    GetWindowTextA(GetDlgItem(hWnd, IDC_HOST_EDIT), buf, sizeof(buf));
-    cfg->host = buf;
-    GetWindowTextA(GetDlgItem(hWnd, IDC_PORT_EDIT), buf, sizeof(buf));
-    char* end = nullptr;
-    const long parsedPort = std::strtol(buf, &end, 10);
-    if (buf[0] == '\0' || end == buf || *end != '\0' ||
-        parsedPort < 1 || parsedPort > 65535) {
-        MessageBoxA(hWnd,
-            "Port must be an integer from 1 to 65535.",
-            "VoxMic - Settings", MB_OK | MB_ICONWARNING);
-        HWND hPortEdit = GetDlgItem(hWnd, IDC_PORT_EDIT);
-        SetFocus(hPortEdit);
-        SendMessageA(hPortEdit, EM_SETSEL, 0, -1);
-        return false;
-    }
-    cfg->port = (int)parsedPort;
 
-    HWND hAppCombo = GetDlgItem(hWnd, IDC_COMBO_ANDROID_APP);
-    int appIdx = (int)SendMessageA(hAppCombo, CB_GETCURSEL, 0, 0);
-    cfg->androidAppPreset = appIdx;
-    if (appIdx == 1) {
+    // Selecting an app preset also picks the socket name and the Android
+    // component to launch; the preset alone is not enough to drive the bridge.
+    if (cfg->androidAppPreset == 1) {
         cfg->androidSocket = "voxmicsource";
         cfg->androidComponent = "com.voxmic.source/.MainActivity";
     } else {
         cfg->androidSocket = "audiosource";
         cfg->androidComponent = "fr.dzx.audiosource/.MainActivity";
     }
-
-    cfg->nsEnabled =
-        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_NS), BM_GETCHECK, 0, 0) == BST_CHECKED);
-    cfg->aecEnabled =
-        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AEC), BM_GETCHECK, 0, 0) == BST_CHECKED);
-    cfg->agcEnabled =
-        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_AGC), BM_GETCHECK, 0, 0) == BST_CHECKED);
-
-    saveDspUiToConfig(hWnd, cfg);
-
-    cfg->debugConsole =
-        (SendMessageA(GetDlgItem(hWnd, IDC_CHECK_DEBUG), BM_GETCHECK, 0, 0) == BST_CHECKED);
     return true;
 }
 
@@ -784,12 +800,6 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         Config* cfg = (Config*)pCreate->lpCreateParams;
         pData = new SettingsDialogData();
         pData->pConfig = cfg;
-        pData->hHintFont = CreateFontA(16, 0, 0, 0, FW_NORMAL, 0, 0, 0,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY, DEFAULT_PITCH, "MS Shell Dlg");
-        pData->hSectionFont = CreateFontA(16, 0, 0, 0, FW_BOLD, 0, 0, 0,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY, DEFAULT_PITCH, "MS Shell Dlg");
         HIGHCONTRASTA highContrast = { sizeof(highContrast) };
         pData->useSystemInputColors =
             SystemParametersInfoA(SPI_GETHIGHCONTRAST,
@@ -800,330 +810,27 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         }
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
 
-        HINSTANCE hInst = pCreate->hInstance;
-        
-        pData->hTab = CreateWindowExA(0, WC_TABCONTROLA, "",
-            WS_CHILD | WS_CLIPSIBLINGS | WS_VISIBLE,
-            10, 10, 465, 465, hWnd, (HMENU)IDC_TAB_MAIN, hInst, NULL);
-            
-        TCITEMA tie = {};
-        tie.mask = TCIF_TEXT;
-        tie.pszText = (LPSTR)"General";
-        SendMessageA(pData->hTab, TCM_INSERTITEMA, 0, (LPARAM)&tie);
-        tie.pszText = (LPSTR)"DSP";
-        SendMessageA(pData->hTab, TCM_INSERTITEMA, 1, (LPARAM)&tie);
+        // The tab, every field and the footer are built from the field table by
+        // the layout engine. Nothing below this line places a control: geometry
+        // lives in settings_metrics.h, and a new option is one table row.
+        metrics::setDpi(GetDpiForWindow(hWnd));
+        pData->layout.build(hWnd, pCreate->hInstance);
 
-        auto addGen = [&](HWND h) { pData->tabGeneralControls.push_back(h); return h; };
-        auto addDsp = [&](HWND h) { pData->tabDspControls.push_back(h); return h; };
-
-        const int xMargin = 25;
-        const int sectionW = 420;
-        const int lblW = 100;
-        const int ctrlX = xMargin + lblW + 8;
-        const int fieldW = 205;
-
-        auto addGenSection = [&](const char* title, int y) {
-            SIZE titleSize = {};
-            HDC hdc = GetDC(hWnd);
-            HFONT oldFont = nullptr;
-            if (hdc && pData->hSectionFont) {
-                oldFont = (HFONT)SelectObject(hdc, pData->hSectionFont);
-                const int titleLength = lstrlenA(title);
-                if (titleLength > 0) {
-                    if (!GetTextExtentPoint32A(
-                            hdc, title, titleLength, &titleSize)) {
-                        titleSize = {};
-                    }
-                }
-                if (oldFont) SelectObject(hdc, oldFont);
-                ReleaseDC(hWnd, hdc);
-            }
-
-            const int titleW = titleSize.cx > 0 ? titleSize.cx : 150;
-            const int lineX = xMargin + titleW + 14;
-            const int lineW = sectionW - (lineX - xMargin);
-
-            HWND heading = addGen(CreateWindowExA(0, "STATIC", title,
-                WS_CHILD | WS_VISIBLE | SS_LEFT,
-                xMargin, y, titleW + 4, 20, hWnd, NULL, hInst, NULL));
-            SendMessageA(heading, WM_SETFONT, (WPARAM)pData->hSectionFont, TRUE);
-
-            if (lineW > 8) {
-                addGen(CreateWindowExA(0, "STATIC", "",
-                    WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-                    lineX, y + 10, lineW, 2,
-                    hWnd, NULL, hInst, NULL));
-            }
-        };
-
-        addGenSection("Connection", 43);
-
-        addGen(CreateWindowExA(0, "STATIC", "ADB Device:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin, 64, lblW, 22, hWnd, NULL, hInst, NULL));
-
-        HWND hCombo = addGen(CreateWindowExA(0, "COMBOBOX", "",
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            ctrlX, 64, 215, 200, hWnd, (HMENU)IDC_COMBO_DEVICE, hInst, NULL));
-        pData->hDeviceCombo = hCombo;
-        SendMessageA(hCombo, CB_SETDROPPEDWIDTH, 300, 0);
-
-        addGen(CreateWindowExA(0, "BUTTON", "Refresh",
-            WS_CHILD | WS_VISIBLE,
-            ctrlX + 225, 63, 66, 25,
-            hWnd, (HMENU)IDC_BTN_REFRESH, hInst, NULL));
-
-        addGen(CreateWindowExA(0, "STATIC", "Host:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin, 92, lblW, 22, hWnd, NULL, hInst, NULL));
-
-        addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", cfg->host.c_str(),
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-            ctrlX, 93, fieldW, 21, hWnd, (HMENU)IDC_HOST_EDIT, hInst, NULL));
-
-        addGen(CreateWindowExA(0, "STATIC", "Port:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin, 120, lblW, 22, hWnd, NULL, hInst, NULL));
-
-        std::string portStr = std::to_string(cfg->port);
-        addGen(CreateWindowExA(WS_EX_CLIENTEDGE, "EDIT", portStr.c_str(),
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_NUMBER,
-            ctrlX, 121, 115, 21, hWnd, (HMENU)IDC_PORT_EDIT, hInst, NULL));
-
-        addGenSection("Android Source", 153);
-        addGen(CreateWindowExA(0, "STATIC", "Android App:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin, 174, lblW, 22, hWnd, NULL, hInst, NULL));
-
-        HWND hAppCombo = addGen(CreateWindowExA(0, "COMBOBOX", "",
-            WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-            ctrlX, 174, 230, 200, hWnd, (HMENU)IDC_COMBO_ANDROID_APP, hInst, NULL));
-        pData->hAndroidAppCombo = hAppCombo;
-
-        SendMessageA(hAppCombo, CB_SETDROPPEDWIDTH, 320, 0);
-        SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"Legacy AudioSource");
-        SendMessageA(hAppCombo, CB_ADDSTRING, 0, (LPARAM)"VoxMic Source (48 kHz)");
-
-        int appSel = cfg->androidAppPreset;
-        if (appSel < 0 || appSel > 1) appSel = 0;
-        SendMessageA(hAppCombo, CB_SETCURSEL, (WPARAM)appSel, 0);
-
-        addGen(CreateWindowExA(0, "STATIC", "Gain:",
-            WS_CHILD | WS_VISIBLE,
-            xMargin, 206, lblW, 22, hWnd, NULL, hInst, NULL));
-
-        addGen(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | WS_VISIBLE,
-            ctrlX + 200, 206, 65, 22, hWnd, (HMENU)IDC_LABEL_GAIN, hInst, NULL));
-
-        HWND hGainTrackbar = addGen(CreateWindowExA(0, TRACKBAR_CLASSA, "",
-            WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_TOOLTIPS,
-            ctrlX, 207, 190, 24, hWnd, (HMENU)IDC_TRACKBAR_GAIN, hInst, NULL));
-        SendMessageA(hGainTrackbar, TBM_SETRANGE, TRUE, MAKELONG(25, 400));
-        SendMessageA(hGainTrackbar, TBM_SETTICFREQ, 25, 0);
-
-        addGenSection("Android Audio Effects", 241);
-        const int effectX = xMargin + 15;
-
-        addGen(CreateWindowExA(0, "BUTTON", "NoiseSuppressor",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            effectX, 264, 150, 22, hWnd, (HMENU)IDC_CHECK_NS, hInst, NULL));
-
-        addGen(CreateWindowExA(0, "BUTTON", "AcousticEchoCanceler",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            effectX + 170, 264, 190, 22, hWnd, (HMENU)IDC_CHECK_AEC, hInst, NULL));
-
-        addGen(CreateWindowExA(0, "BUTTON", "AutomaticGainControl",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            effectX, 294, 170, 22, hWnd, (HMENU)IDC_CHECK_AGC, hInst, NULL));
-
-        HWND hEffectsHint = addGen(CreateWindowExA(0, "STATIC",
-            "Connection, Android effects and debug console changes apply after restart.",
-            WS_CHILD | WS_VISIBLE,
-            effectX, 322, 395, 16, hWnd, NULL, hInst, NULL));
-        pData->hintControls.push_back(hEffectsHint);
-
-        addGenSection("Application", 350);
-
-        addGen(CreateWindowExA(0, "BUTTON", "Show Debug Console",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            xMargin + 15, 373, 220, 22, hWnd, (HMENU)IDC_CHECK_DEBUG, hInst, NULL));
-
-        addGen(CreateWindowExA(0, "BUTTON", "Start VoxMic with Windows",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-            xMargin + 15, 401, 250, 22, hWnd, (HMENU)IDC_CHECK_STARTUP, hInst, NULL));
-
-        HWND hStartupHint = addGen(CreateWindowExA(0, "STATIC",
-            "Registers this copy in Windows startup.",
-            WS_CHILD | WS_VISIBLE,
-            xMargin + 15, 429, 395, 16, hWnd, (HMENU)IDC_LABEL_STARTUP_HINT, hInst, NULL));
-        pData->hintControls.push_back(hStartupHint);
-
-        // --- DSP Tab Controls ---
-        // Keep the existing 500x565 window height. The DSP page uses the
-        // available right-side space for a compact processing-chain summary.
-        const int dspX = 20;
-        const int dspLabelX = 35;
-        const int dspCtrlX = 128;
-        const int dspSliderW = 240;
-        const int dspValueX = 380;
-        const int dspValueW = 55;
-
-        auto addDspGroup = [&](const char* title, int x, int y, int w, int h) {
-            HWND group = addDsp(CreateWindowExA(0, "BUTTON", title,
-                WS_CHILD | BS_GROUPBOX,
-                x, y, w, h, hWnd, NULL, hInst, NULL));
-            SendMessageA(group, WM_SETFONT, (WPARAM)pData->hSectionFont, TRUE);
-            return group;
-        };
-
-        HWND hChainStatus = addDsp(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | SS_LEFT | SS_NOPREFIX,
-            dspX + 10, 45, 435, 22, hWnd,
-            (HMENU)IDC_LABEL_DSP_CHAIN_STATUS, hInst, NULL));
-        SendMessageA(hChainStatus, WM_SETFONT, (WPARAM)pData->hHintFont, TRUE);
-        pData->hDspChainStatus = hChainStatus;
-        pData->hintControls.push_back(hChainStatus);
-
-        addDspGroup("Noise Reduction", dspX, 70, 445, 165);
-        addDsp(CreateWindowExA(0, "BUTTON", "Enable noise reduction",
-            WS_CHILD | BS_AUTOCHECKBOX,
-            dspLabelX, 91, 170, 22, hWnd, (HMENU)IDC_CHECK_NR, hInst, NULL));
-
-        HWND hBackendLabel = addDsp(CreateWindowExA(0, "STATIC", "Backend:",
-            WS_CHILD,
-            dspLabelX + 10, 120, 85, 22, hWnd, NULL, hInst, NULL));
-        HWND hBackendCombo = addDsp(CreateWindowExA(0, "COMBOBOX", "",
-            WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
-            dspCtrlX, 118, 235, 100, hWnd, (HMENU)IDC_COMBO_NR_BACKEND, hInst, NULL));
-        pData->hNrBackendCombo = hBackendCombo;
-        SendMessageA(hBackendCombo, CB_ADDSTRING, 0, (LPARAM)"RNNoise (built-in)");
-        SendMessageA(hBackendCombo, CB_ADDSTRING, 0, (LPARAM)"DPDFNet (48 kHz model)");
-
-        HWND hBackendStatus = addDsp(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD | SS_OWNERDRAW,
-            dspLabelX + 10, 147, 400, 38, hWnd,
-            (HMENU)IDC_LABEL_NR_BACKEND_STATUS, hInst, NULL));
-        SendMessageA(hBackendStatus, WM_SETFONT, (WPARAM)pData->hHintFont, TRUE);
-
-        HWND hNrStrengthLabel = addDsp(CreateWindowExA(0, "STATIC", "NR Strength:",
-            WS_CHILD,
-            dspLabelX + 10, 187, 85, 22, hWnd, NULL, hInst, NULL));
-        addDsp(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD,
-            dspValueX, 187, dspValueW, 22, hWnd, (HMENU)IDC_LABEL_NRSTR, hInst, NULL));
-        HWND hNrStrTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
-            WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
-            dspCtrlX, 186, dspSliderW, 24, hWnd, (HMENU)IDC_TRACKBAR_NRSTR, hInst, NULL));
-        SendMessageA(hNrStrTrackbar, TBM_SETRANGE, TRUE, MAKELONG(30, 95));
-        SendMessageA(hNrStrTrackbar, TBM_SETTICFREQ, 10, 0);
-
-        HWND hNrHint = addDsp(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD,
-            dspLabelX + 10, 215, 400, 16, hWnd, NULL, hInst, NULL));
-        pData->hNrStrengthHint = hNrHint;
-        pData->hintControls.push_back(hNrHint);
-        pData->nrDependentControls.push_back(hBackendLabel);
-        pData->nrDependentControls.push_back(hBackendCombo);
-        pData->nrDependentControls.push_back(hBackendStatus);
-        pData->nrDependentControls.push_back(hNrStrengthLabel);
-        pData->nrDependentControls.push_back(hNrHint);
-
-        addDspGroup("Tone / EQ", dspX, 245, 445, 145);
-        addDsp(CreateWindowExA(0, "BUTTON", "EQ Enable",
-            WS_CHILD | BS_AUTOCHECKBOX,
-            dspLabelX, 266, 120, 22, hWnd, (HMENU)IDC_CHECK_EQ, hInst, NULL));
-
-        HWND hPresenceLabel = addDsp(CreateWindowExA(0, "STATIC", "Presence:",
-            WS_CHILD,
-            dspLabelX, 295, 85, 22, hWnd, NULL, hInst, NULL));
-        HWND hPresenceValue = addDsp(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD,
-            dspValueX, 295, dspValueW, 22, hWnd, (HMENU)IDC_LABEL_PRES, hInst, NULL));
-        HWND hPresTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
-            WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
-            dspCtrlX, 294, dspSliderW, 24, hWnd, (HMENU)IDC_TRACKBAR_PRES, hInst, NULL));
-        SendMessageA(hPresTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 80));
-        SendMessageA(hPresTrackbar, TBM_SETTICFREQ, 10, 0);
-
-        HWND hPresHint = addDsp(CreateWindowExA(0, "STATIC",
-            "Boost vocal presence and articulation (1.7-3.7 kHz)",
-            WS_CHILD,
-            dspLabelX + 10, 322, 400, 16, hWnd, NULL, hInst, NULL));
-        pData->hintControls.push_back(hPresHint);
-
-        HWND hBassLabel = addDsp(CreateWindowExA(0, "STATIC", "Bass Cut:",
-            WS_CHILD,
-            dspLabelX, 345, 85, 22, hWnd, NULL, hInst, NULL));
-        HWND hBassValue = addDsp(CreateWindowExA(0, "STATIC", "",
-            WS_CHILD,
-            dspValueX, 345, dspValueW, 22, hWnd, (HMENU)IDC_LABEL_BASS, hInst, NULL));
-        HWND hBassTrackbar = addDsp(CreateWindowExA(0, TRACKBAR_CLASSA, "",
-            WS_CHILD | TBS_HORZ | TBS_TOOLTIPS,
-            dspCtrlX, 344, dspSliderW, 24, hWnd, (HMENU)IDC_TRACKBAR_BASS, hInst, NULL));
-        SendMessageA(hBassTrackbar, TBM_SETRANGE, TRUE, MAKELONG(0, 60));
-        SendMessageA(hBassTrackbar, TBM_SETTICFREQ, 10, 0);
-
-        HWND hBassHint = addDsp(CreateWindowExA(0, "STATIC",
-            "Reduce low-frequency rumble below 250 Hz",
-            WS_CHILD,
-            dspLabelX + 10, 372, 400, 16, hWnd, NULL, hInst, NULL));
-        pData->hintControls.push_back(hBassHint);
-
-        pData->eqDependentControls.push_back(hPresenceLabel);
-        pData->eqDependentControls.push_back(hPresenceValue);
-        pData->eqDependentControls.push_back(hPresTrackbar);
-        pData->eqDependentControls.push_back(hPresHint);
-        pData->eqDependentControls.push_back(hBassLabel);
-        pData->eqDependentControls.push_back(hBassValue);
-        pData->eqDependentControls.push_back(hBassTrackbar);
-        pData->eqDependentControls.push_back(hBassHint);
-
-        addDspGroup("Dynamics", dspX, 400, 445, 65);
-        addDsp(CreateWindowExA(0, "BUTTON", "Compressor Enable",
-            WS_CHILD | BS_AUTOCHECKBOX,
-            dspLabelX, 422, 170, 22, hWnd, (HMENU)IDC_CHECK_COMP, hInst, NULL));
-        HWND hCompHint = addDsp(CreateWindowExA(0, "STATIC",
-            "Stabilizes voice volume with a fixed voice preset.",
-            WS_CHILD,
-            dspLabelX + 10, 447, 400, 16, hWnd, (HMENU)IDC_LABEL_COMP_HINT, hInst, NULL));
-        pData->hintControls.push_back(hCompHint);
+        pData->hApply = pData->layout.footerButton(IDC_BTN_APPLY);
+        pData->hDeviceCombo = pData->layout.control(IDC_COMBO_DEVICE);
+        pData->hAndroidAppCombo = pData->layout.control(IDC_COMBO_ANDROID_APP);
+        pData->hNrBackendCombo = pData->layout.control(IDC_COMBO_NR_BACKEND);
+        pData->hDspChainStatus = pData->layout.control(IDC_LABEL_DSP_CHAIN_STATUS);
+        pData->hNrStrengthHint = pData->layout.hint(IDC_TRACKBAR_NRSTR);
 
         pData->editBaseConfig = *cfg;
         pData->hasEditBase = true;
 
-        for (HWND hHint : pData->hintControls) {
-            SendMessageA(hHint, WM_SETFONT, (WPARAM)pData->hHintFont, TRUE);
-        }
-
+        // The device list is populated from `adb devices` first, so the config
+        // load afterwards can select the saved serial out of it.
+        refreshDeviceList(pData->hDeviceCombo, cfg->serial);
         loadAllUiFromConfig(hWnd, cfg);
-
-        // Establish the initial tab visibility explicitly. Some owner-draw
-        // child controls can receive an initial paint while the parent is
-        // still being created, so do not rely only on the absence of
-        // WS_VISIBLE in their creation styles.
-        showTabControls(pData, 0);
-
-        int btnY = 490;
-        
-        CreateWindowExA(0, "BUTTON", "Reset to Defaults",
-            WS_CHILD | WS_VISIBLE,
-            10, btnY, 145, 25, hWnd, (HMENU)IDC_BTN_RESET, hInst, NULL);
-
-        CreateWindowExA(0, "BUTTON", "Cancel",
-            WS_CHILD | WS_VISIBLE,
-            240, btnY, 75, 25, hWnd, (HMENU)IDC_BTN_CANCEL, hInst, NULL);
-
-        pData->hApply = CreateWindowExA(0, "BUTTON", "Apply",
-            WS_CHILD | WS_VISIBLE,
-            325, btnY, 75, 25, hWnd, (HMENU)IDC_BTN_APPLY, hInst, NULL);
-
-        CreateWindowExA(0, "BUTTON", "OK",
-            WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
-            410, btnY, 75, 25, hWnd, (HMENU)IDC_BTN_OK, hInst, NULL);
         updateDirtyUi(hWnd);
-
-        refreshDeviceList(hCombo, cfg->serial);
 
         refreshStartupRegistrationControl(hWnd);
         SetTimer(hWnd, ID_TIMER_BACKEND_STATUS, 500, nullptr);
@@ -1134,12 +841,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_SHOWWINDOW:
         // 每次显示都重新查注册表（Portable 移动后旧值失效会被识别）。
         if (wParam) {
-            const int selectedTab = (pData && pData->hTab)
-                ? (int)SendMessageA(pData->hTab, TCM_GETCURSEL, 0, 0)
-                : 0;
+            HWND tab = GetDlgItem(hWnd, IDC_TAB_MAIN);
+            const int selectedTab =
+                tab ? (int)SendMessageA(tab, TCM_GETCURSEL, 0, 0) : 0;
             if (pData) {
                 beginSettingsEdit(hWnd);
-                showTabControls(pData, selectedTab == 1 ? 1 : 0);
+                pData->layout.showPage(selectedTab == 1 ? 1 : 0);
             }
             refreshStartupRegistrationControl(hWnd);
             updateDenoiseBackendUi(hWnd);
@@ -1173,8 +880,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 GetSysColorBrush(COLOR_BTNFACE));
 
             HFONT oldFont = nullptr;
-            if (pData && pData->hHintFont) {
-                oldFont = (HFONT)SelectObject(draw->hDC, pData->hHintFont);
+            if (pData && pData->layout.bodyFont()) {
+                oldFont = (HFONT)SelectObject(draw->hDC, pData->layout.bodyFont());
             }
             SetBkMode(draw->hDC, TRANSPARENT);
             SetTextColor(draw->hDC, denoiseStatusColor(hWnd));
@@ -1209,27 +916,27 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             return (LRESULT)brush;
         }
 
-        if (pData) {
-            for (HWND hHint : pData->hintControls) {
-                if (hCtrl == hHint) {
-                    // These labels change between messages. An opaque
-                    // button-face background clears the previous, longer
-                    // string before the replacement is painted.
-                    SetBkMode(hdc, OPAQUE);
-                    SetBkColor(hdc, GetSysColor(COLOR_BTNFACE));
-                    SetTextColor(hdc,
-                        pData->useSystemInputColors
-                            ? GetSysColor(COLOR_GRAYTEXT)
-                            : RGB(128, 128, 128));
-                    return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
-                }
-            }
+        // Nearly every text widget paints with a transparent background so it
+        // blends into the page surface the layout puts behind it; the ones whose
+        // text changes at runtime take an opaque background so the previous,
+        // longer string is cleared before the new one is drawn.
+        const settings::TextRole role = settings::TextRoleOf(hCtrl);
+        const COLORREF roleText = IsWindowEnabled(hCtrl)
+                                      ? GetSysColor(COLOR_BTNTEXT)
+                                      : GetSysColor(COLOR_GRAYTEXT);
+        if (role == settings::TextRole::Transparent) {
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, roleText);
+            return (LRESULT)GetStockObject(NULL_BRUSH);
         }
-
-        // Let common controls such as Trackbar keep their native themed
-        // painting. Returning a NULL_BRUSH here leaves the trackbar surface
-        // unpainted on some Windows themes, which produces a black bar.
-        return DefWindowProcA(hWnd, msg, wParam, lParam);
+        SetBkMode(hdc, OPAQUE);
+        SetBkColor(hdc, GetSysColor(COLOR_BTNFACE));
+        SetTextColor(hdc, role == settings::TextRole::Hint
+                              ? (pData && pData->useSystemInputColors
+                                     ? GetSysColor(COLOR_GRAYTEXT)
+                                     : RGB(128, 128, 128))
+                              : roleText);
+        return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
     }
 
     case WM_CTLCOLOREDIT: {
@@ -1259,8 +966,9 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_NOTIFY: {
         LPNMHDR lpnmhdr = (LPNMHDR)lParam;
         if (lpnmhdr->idFrom == IDC_TAB_MAIN && lpnmhdr->code == TCN_SELCHANGE) {
-            int sel = (int)SendMessageA(pData->hTab, TCM_GETCURSEL, 0, 0);
-            showTabControls(pData, sel);
+            HWND tab = GetDlgItem(hWnd, IDC_TAB_MAIN);
+            const int sel = tab ? (int)SendMessageA(tab, TCM_GETCURSEL, 0, 0) : 0;
+            pData->layout.showPage(sel);
         }
         return 0;
     }
@@ -1268,23 +976,12 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_HSCROLL: {
         HWND hTrackbar = (HWND)lParam;
         bool audioPreviewChanged = false;
-        if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_GAIN)) {
-            int pos = (int)SendMessageA(hTrackbar, TBM_GETPOS, 0, 0);
-            float g = (float)pos / 100.0f;
-            char buf[32];
-            snprintf(buf, sizeof(buf), "%.2fx", g);
-            SetWindowTextA(GetDlgItem(hWnd, IDC_LABEL_GAIN), buf);
+        forEachField([&](const settings::FieldSpec& field) {
+            if (field.kind != settings::FieldKind::Slider) return;
+            if (GetDlgItem(hWnd, field.id) != hTrackbar) return;
+            updateSliderLabel(hWnd, field);
             audioPreviewChanged = true;
-        } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_PRES)) {
-            updatePresLabel(hWnd);
-            audioPreviewChanged = true;
-        } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_BASS)) {
-            updateBassLabel(hWnd);
-            audioPreviewChanged = true;
-        } else if (hTrackbar == GetDlgItem(hWnd, IDC_TRACKBAR_NRSTR)) {
-            updateNrStrLabel(hWnd);
-            audioPreviewChanged = true;
-        }
+        });
         if (audioPreviewChanged) {
             markSettingsDirty(hWnd);
             applyDspPreviewFromUi(hWnd);
@@ -1390,19 +1087,35 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         return 0;
     }
 
+    case WM_SIZE:
+        // The window is fixed-size, so a resize only happens when the DPI
+        // changed or when the layout had to grow it to fit its tallest page.
+        if (pData) pData->layout.relayout(hWnd);
+        return 0;
+
+    case WM_DPICHANGED: {
+        // The window is per-monitor DPI aware (see src/app.manifest), so it has
+        // to rescale itself when it moves to a monitor with a different scale.
+        metrics::setDpi(HIWORD(wParam));
+        RECT* suggested = (RECT*)lParam;
+        SetWindowPos(hWnd, nullptr, suggested->left, suggested->top,
+                     suggested->right - suggested->left,
+                     suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        if (pData) pData->layout.relayout(hWnd);
+        InvalidateRect(hWnd, nullptr, TRUE);
+        return 0;
+    }
+
     case WM_CLOSE:
         SendMessageA(hWnd, WM_COMMAND, MAKEWPARAM(IDC_BTN_CANCEL, 0), 0);
         return 0;
 
     case WM_DESTROY:
         KillTimer(hWnd, ID_TIMER_BACKEND_STATUS);
-        if (pData && pData->hHintFont) {
-            DeleteObject(pData->hHintFont);
-            pData->hHintFont = NULL;
-        }
-        if (pData && pData->hSectionFont) {
-            DeleteObject(pData->hSectionFont);
-            pData->hSectionFont = NULL;
+        if (pData) {
+            // Fonts belong to the layout engine, which created them.
+            pData->layout.destroyFonts();
         }
         if (pData && pData->hInputBrush) {
             DeleteObject(pData->hInputBrush);
@@ -1424,6 +1137,10 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
         ccInitialized = true;
     }
 
+    // Created at the system DPI and corrected to the window's real monitor DPI
+    // in WM_CREATE, which is where GetDpiForWindow becomes valid.
+    metrics::setDpi(GetDpiForSystem());
+
     WNDCLASSEXA wc = {};
     wc.cbSize = sizeof(WNDCLASSEXA);
     wc.lpfnWndProc = SettingsWndProc;
@@ -1438,20 +1155,33 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
         SETTINGS_CLASS,
         "VoxMic - Settings",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        0, 0, 500, 565,
+        0, 0, metrics::S(metrics::WinW), metrics::S(metrics::WinH),
         NULL, NULL, hInstance, pConfig);
 
     if (!hWnd) return NULL;
 
-    RECT childRect;
-    GetWindowRect(hWnd, &childRect);
-    int childW = childRect.right - childRect.left;
-    int childH = childRect.bottom - childRect.top;
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
+    // Centre on the work area and never exceed it: on a scaled display the
+    // design size can be taller than the usable screen.
+    RECT work = { 0, 0, 0, 0 };
+    if (!SystemParametersInfoA(SPI_GETWORKAREA, 0, &work, 0)) {
+        work.right = GetSystemMetrics(SM_CXSCREEN);
+        work.bottom = GetSystemMetrics(SM_CYSCREEN);
+    }
+    RECT windowRect;
+    GetWindowRect(hWnd, &windowRect);
+    int w = windowRect.right - windowRect.left;
+    int h = windowRect.bottom - windowRect.top;
+    const int workW = work.right - work.left;
+    const int workH = work.bottom - work.top;
+    if (workW > 0 && w > workW) w = workW;
+    if (workH > 0 && h > workH) h = workH;
+    if (w != windowRect.right - windowRect.left ||
+        h != windowRect.bottom - windowRect.top) {
+        SetWindowPos(hWnd, NULL, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER);
+    }
     SetWindowPos(hWnd, NULL,
-        (screenW - childW) / 2,
-        (screenH - childH) / 2,
+        work.left + (workW - w) / 2,
+        work.top + (workH - h) / 2,
         0, 0, SWP_NOSIZE | SWP_NOZORDER);
 
     return hWnd;
