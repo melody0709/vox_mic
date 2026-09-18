@@ -19,6 +19,7 @@
 #endif
 
 #include "dsp/sherpa_onnx_api.h"
+#include "dsp/tagged_block_queue.h"
 
 #if VOXMIC_ENABLE_DPDFNET
 #include <sherpa-onnx/c-api/c-api.h>
@@ -72,47 +73,7 @@ static bool makeAbsolutePath(std::wstring& path) {
 }
 #endif
 
-template <size_t Capacity>
-class TaggedBlockQueue {
-public:
-    struct Block {
-        uint64_t epoch = 0;
-        float samples[DPDFNET_BLOCK_SAMPLES]{};
-    };
 
-    bool push(uint64_t epoch, std::span<const float> samples) {
-        if (samples.size() < DPDFNET_BLOCK_SAMPLES) return false;
-        const size_t write = m_write.load(std::memory_order_relaxed);
-        const size_t next = (write + 1) % Capacity;
-        if (next == m_read.load(std::memory_order_acquire)) return false;
-
-        m_blocks[write].epoch = epoch;
-        std::memcpy(m_blocks[write].samples, samples.data(),
-            sizeof(m_blocks[write].samples));
-        m_write.store(next, std::memory_order_release);
-        return true;
-    }
-
-    bool pop(Block& block) {
-        const size_t read = m_read.load(std::memory_order_relaxed);
-        if (read == m_write.load(std::memory_order_acquire)) return false;
-
-        block = m_blocks[read];
-        m_read.store((read + 1) % Capacity, std::memory_order_release);
-        return true;
-    }
-
-    // Called only by the single consumer side of this queue.
-    void discardAll() {
-        m_read.store(m_write.load(std::memory_order_acquire),
-            std::memory_order_release);
-    }
-
-private:
-    std::array<Block, Capacity> m_blocks{};
-    std::atomic<size_t> m_read{0};
-    std::atomic<size_t> m_write{0};
-};
 
 } // namespace
 
@@ -682,6 +643,15 @@ bool DpdfnetProcessor::processBlock(std::span<const float> input,
 
     m_impl->outputUnderflows.fetch_add(1, std::memory_order_relaxed);
     return false;
+#endif
+}
+
+void DpdfnetProcessor::releaseSession() {
+#if VOXMIC_ENABLE_DPDFNET
+    // stopWorker() already destroys the session, closes the events and unloads
+    // the library, and its guard keeps the resources of an abandoned worker
+    // alive rather than freeing memory that thread may still be reading.
+    m_impl->stopWorker();
 #endif
 }
 

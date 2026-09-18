@@ -80,7 +80,8 @@ inline AppState g_appState{};
 // ---- commands the UI issues against the engine -------------------------------
 // Declared here so callers no longer re-declare them as `extern`. The `extern`
 // keyword was redundant on function declarations anyway.
-void syncDspAtomsFromConfig(const Config& cfg);
+// committed=false previews, true commits; only a commit may free DPDFNet.
+void syncDspAtomsFromConfig(const Config& cfg, bool committed);
 void syncDspAtomsFromConfig();
 void requestDenoiseReset();
 void setDemandModeRuntime(bool enabled);

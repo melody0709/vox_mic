@@ -36,6 +36,10 @@ public:
     std::atomic<double> estLatencyMs{0};
     std::atomic<int> renderStallScore{0};
 
+    // DPDFNet lifetime, forwarded from whoever owns the backend decision.
+    void loadDpdfnetIfNeeded() { m_pipeline.loadDpdfnetIfNeeded(); }
+    void releaseDpdfnet() { m_pipeline.releaseDpdfnet(); }
+
     double dpdfnetWorkerProcUsEma() const { return m_pipeline.dpdfnetWorkerProcUsEma(); }
     uint64_t dpdfnetUnderflows() const { return m_pipeline.dpdfnetUnderflows(); }
     uint64_t dpdfnetInputDrops() const { return m_pipeline.dpdfnetInputDrops(); }

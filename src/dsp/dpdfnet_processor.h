@@ -57,6 +57,13 @@ public:
     // prepare() refuses to reuse it - a restart is needed to get DPDFNet back.
     bool workerAbandoned() const;
 
+    // Frees the loaded runtime and session, returning the object to its
+    // pre-prepare state so prepare() can load it again later. This is what
+    // makes the payload releasable when the user switches back to RNNoise.
+    // Refuses to free when the worker had to be abandoned, exactly as the
+    // destructor does.
+    void releaseSession();
+
     const std::string& prepareError() const;
 
     uint64_t inputDrops() const;

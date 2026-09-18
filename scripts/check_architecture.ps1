@@ -35,20 +35,21 @@ $CMake = Join-Path $Root 'CMakeLists.txt'
 # Payback status, rechecked after the Slint work was dropped:
 #   main.cpp - PAID BACK. 638 lines, under the pre-B2 650, so the ceiling is
 #     restored to 650 instead of being left at the 655 it was raised to.
-#   dpdfnet_processor.cpp - PARTLY PAID BACK. 814 -> 791 by extracting the
-#     sherpa-onnx dynamic loader into src/dsp/sherpa_onnx_api.h, which is a
-#     genuinely separate responsibility (resolve entry points out of an
-#     optional DLL vs run the model). The remaining ~63 over the pre-B2 728 is
-#     the abandoned-worker handling. Nothing repays that any more now that B5
-#     is cancelled, so it is accepted explicitly here rather than left as a
-#     promise to a step that will never run.
+#   dpdfnet_processor.cpp - PARTLY PAID BACK. 814 -> 791 -> 761 by extracting
+#     two self-contained pieces to their own headers: the sherpa-onnx dynamic
+#     loader (src/dsp/sherpa_onnx_api.h) and the block queue
+#     (src/dsp/tagged_block_queue.h). Both are genuinely separate
+#     responsibilities, not file-splitting for its own sake. The remaining ~33
+#     over the pre-B2 728 is the abandoned-worker handling, accepted explicitly
+#     here since nothing repays it now that B5 is cancelled.
 $LineBaselines = @{
     'AGENTS.md'                     = 145   # loaded in full every session; keep it a rule sheet, not a manual
     'src/settings_dialog.cpp'       = 1458
-    'src/main.cpp'                  = 650   # pre-B2 value, restored; actual 638
+    'src/main.cpp'                  = 650   # pre-B2 value; actual 650, at the line
     'src/mic_usage_monitor.cpp'     = 652
-    'src/dsp/dpdfnet_processor.cpp' = 791   # pre-B2: 728; 63 lines of accepted debt, see above
+    'src/dsp/dpdfnet_processor.cpp' = 761   # pre-B2: 728; 33 lines of accepted debt
     'src/dsp/sherpa_onnx_api.h'     = 80    # extracted dynamic loader
+    'src/dsp/tagged_block_queue.h'  = 70    # extracted SPSC block ring
 }
 
 # Measured 2026-09-17. Ratchet: these may only go DOWN. Raising one requires

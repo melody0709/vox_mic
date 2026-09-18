@@ -577,7 +577,7 @@ static void applyDspPreviewFromUi(HWND hWnd) {
 
     const bool oldNrEnabled = g_appState.nrEnabled.load(std::memory_order_acquire);
     const int oldBackend = g_appState.denoiseBackend.load(std::memory_order_acquire);
-    syncDspAtomsFromConfig(preview);
+    syncDspAtomsFromConfig(preview, false);
 
     if (oldNrEnabled != preview.nrEnabled ||
         oldBackend != denoiseBackendKind(preview)) {
@@ -595,7 +595,7 @@ static void restoreDspPreviewFromSnapshot(HWND hWnd) {
 
     const bool oldNrEnabled = g_appState.nrEnabled.load(std::memory_order_acquire);
     const int oldBackend = g_appState.denoiseBackend.load(std::memory_order_acquire);
-    syncDspAtomsFromConfig(pData->editBaseConfig);
+    syncDspAtomsFromConfig(pData->editBaseConfig, false);
 
     if (oldNrEnabled != pData->editBaseConfig.nrEnabled ||
         oldBackend != denoiseBackendKind(pData->editBaseConfig)) {
@@ -672,7 +672,7 @@ static bool commitSettings(HWND hWnd) {
     }
 
     *pData->pConfig = committed;
-    syncDspAtomsFromConfig(*pData->pConfig);
+    syncDspAtomsFromConfig(*pData->pConfig, true);
 
     const bool backendChanged =
         _stricmp(oldBackend.c_str(), pData->pConfig->denoiseBackend.c_str()) != 0;

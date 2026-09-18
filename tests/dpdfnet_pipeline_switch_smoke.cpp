@@ -187,8 +187,38 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // ---- on-demand lifetime -------------------------------------------------
+    // Captured before the release: prepare() resets these counters, so reading
+    // them afterwards would report zeroes and lose the evidence above.
+    const uint64_t underflows = pipeline.dpdfnetUnderflows();
+    const double workerUs = pipeline.dpdfnetWorkerProcUsEma();
+
+    // The payload costs ~43 MB resident, so it has to be freeable when the user
+    // switches back to RNNoise and loadable again afterwards. This drives the
+    // same two calls the settings dialog drives on preview and on Apply.
+    pipeline.releaseDpdfnet();
+    pipeline.loadDpdfnetIfNeeded();
+    if (!pipeline.dpdfnetReady()) {
+        std::printf("ERROR: on-demand load did not restore the session\n");
+        return 1;
+    }
+    pipeline.releaseDpdfnet();
+    if (pipeline.dpdfnetReady() ||
+        g_appState.dpdfnetLoadState.load(std::memory_order_acquire) !=
+            static_cast<int>(DpdfnetLoadState::NotLoaded)) {
+        std::printf("ERROR: releaseDpdfnet did not unload the session\n");
+        return 1;
+    }
+    // Audio must keep flowing with the payload gone: the pipeline falls back to
+    // RNNoise, so nothing goes silent while DPDFNet is not loaded.
+    for (int i = 0; i < 20; ++i, ++block) {
+        if (!processOne(pipeline, block, 1)) {
+            std::printf("ERROR: non-finite output while DPDFNet was unloaded\n");
+            return 1;
+        }
+    }
+
     std::printf("DPDFNet pipeline switch smoke OK: watchdog=1 hard_failure=1 underflows=%llu worker=%.1fus\n",
-        static_cast<unsigned long long>(pipeline.dpdfnetUnderflows()),
-        pipeline.dpdfnetWorkerProcUsEma());
+        static_cast<unsigned long long>(underflows), workerUs);
     return 0;
 }

@@ -28,6 +28,36 @@ public:
     DspPipeline(const DspPipeline&) = delete;
     DspPipeline& operator=(const DspPipeline&) = delete;
 
+    // ---- DPDFNet lifetime. Never call these from the render thread. --------
+    // Loading allocates and blocks for hundreds of milliseconds; releasing
+    // stops the worker, which measures 16-31 ms on the normal path and can
+    // reach the stop budget only if that worker is wedged. Both are called from
+    // the settings dialog, where a short block is already the norm (it saves
+    // config.ini and shows message boxes on the same thread).
+    void loadDpdfnetIfNeeded() {
+        if (m_runtimeDirectory.empty()) return;  // init() has not run yet
+        if (m_dpdfnet.isReady()) return;         // already loaded
+        loadDpdfnetNow();
+    }
+
+    void releaseDpdfnet() {
+        if (g_appState.dpdfnetLoadState.load(std::memory_order_acquire) ==
+            static_cast<int>(DpdfnetLoadState::NotLoaded)) {
+            return;  // nothing is loaded, so nothing to free
+        }
+        m_dpdfnet.releaseSession();
+        if (m_dpdfnet.workerAbandoned()) {
+            // The worker never returned; its resources are leaked on purpose
+            // and this session can never be prepared again. Same rule as the
+            // destructor: leak rather than free memory still in use.
+            setDpdfnetLoadState(DpdfnetLoadState::Failed);
+            printf("[DPDFNet] release skipped: worker was abandoned\n");
+            return;
+        }
+        setDpdfnetLoadState(DpdfnetLoadState::NotLoaded);
+        printf("[DPDFNet] released: backend is RNNoise again\n");
+    }
+
     bool init(float sampleRate, const std::wstring& runtimeDirectory,
         const std::wstring& modelPath) {
         m_sampleRate = sampleRate;

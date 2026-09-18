@@ -70,7 +70,9 @@ static const char* bridgeStatusName(int status) {
     }
 }
 
-void syncDspAtomsFromConfig(const Config& cfg) {
+// committed=false previews (the dialog is open, the user may switch back) and
+// may load DPDFNet but never frees it; committed=true is the Apply path.
+void syncDspAtomsFromConfig(const Config& cfg, bool committed) {
     g_appState.gain.store(cfg.gain, std::memory_order_relaxed);
     g_appState.eqEnabled.store(cfg.eqEnabled, std::memory_order_relaxed);
     g_appState.eqPresence.store(cfg.eqPresence, std::memory_order_relaxed);
@@ -82,10 +84,18 @@ void syncDspAtomsFromConfig(const Config& cfg) {
         ? static_cast<int>(DenoiseBackendKind::Dpdfnet)
         : static_cast<int>(DenoiseBackendKind::Rnnoise);
     g_appState.denoiseBackend.store(backend, std::memory_order_release);
+
+    // The backend is published here, so this is also where the ~43 MB payload's
+    // existence is decided.
+    if (!g_wasapiOutput) return;
+    if (backend == static_cast<int>(DenoiseBackendKind::Dpdfnet))
+        g_wasapiOutput->loadDpdfnetIfNeeded();
+    else if (committed)
+        g_wasapiOutput->releaseDpdfnet();
 }
 
 void syncDspAtomsFromConfig() {
-    syncDspAtomsFromConfig(g_appState.config);
+    syncDspAtomsFromConfig(g_appState.config, false);
 }
 
 void requestDenoiseReset() {
