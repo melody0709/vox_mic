@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxType Settings 界面对标报告 · VoxMic</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --line:#e3e6ea; --line-strong:#cbd2da;
+    --ink:#1b1f24; --ink-2:#4a5560; --ink-3:#78828d;
+    --accent:#0d7d74; --accent-soft:#e6f4f2;
+    --warn:#a15c00; --warn-soft:#fdf3e3;
+    --bad:#b3261e; --bad-soft:#fdecea;
+    --ok:#1b6e3c; --ok-soft:#e9f5ee;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:40px 24px 72px;
+    background:var(--bg); color:var(--ink);
+    font:15px/1.7 -apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px;margin:0 auto}
+  header{border-bottom:2px solid var(--line-strong);padding-bottom:22px;margin-bottom:28px}
+  h1{font-size:26px;line-height:1.35;margin:0 0 10px;letter-spacing:-.2px}
+  .meta{color:var(--ink-3);font-size:13px;line-height:1.9}
+  .meta b{color:var(--ink-2);font-weight:600}
+  h2{font-size:19px;margin:40px 0 14px;padding-left:11px;border-left:4px solid var(--accent)}
+  h3{font-size:15.5px;margin:26px 0 10px;color:var(--ink)}
+  p{margin:10px 0}
+  code{
+    font:13px/1.5 "Cascadia Mono",Consolas,"SF Mono",monospace;
+    background:#eef1f4;border:1px solid var(--line);border-radius:4px;
+    padding:1px 5px;color:#28313a;white-space:nowrap;
+  }
+  pre{background:#22262b;color:#dfe4ea;border-radius:10px;padding:16px 18px;overflow-x:auto;
+      font:12.5px/1.65 "Cascadia Mono",Consolas,monospace;margin:14px 0}
+  pre .c{color:#8b949e}
+  .verdict{
+    background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:10px;padding:20px 22px;margin:0 0 8px;
+  }
+  .verdict p:first-child{margin-top:0}
+  .verdict p:last-child{margin-bottom:0}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 17px;margin:14px 0}
+  .box .k{font-size:12px;color:var(--ink-3);letter-spacing:.4px;margin-bottom:6px}
+  table{width:100%;border-collapse:collapse;margin:16px 0;background:var(--card);font-size:14px;
+        border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th{background:#eef1f4;text-align:left;font-weight:600;font-size:13px;color:var(--ink-2);
+     padding:10px 12px;border-bottom:1px solid var(--line-strong)}
+  td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.n{white-space:nowrap;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:20px;
+       border:1px solid transparent;white-space:nowrap}
+  .t-ok{background:var(--ok-soft);color:var(--ok);border-color:#c4e2d1}
+  .t-bad{background:var(--bad-soft);color:var(--bad);border-color:#f2cdc9}
+  .t-warn{background:var(--warn-soft);color:var(--warn);border-color:#f0dcb8}
+  .t-acc{background:var(--accent-soft);color:var(--accent);border-color:#bfe0dc}
+  .star{color:#d99a2b;letter-spacing:1px;white-space:nowrap}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:6px 0}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:16px 18px;margin:14px 0;border-left:3px solid var(--line-strong)}
+  .item.p0{border-left-color:var(--bad)}
+  .item.p1{border-left-color:#d99a2b}
+  .item.p2{border-left-color:var(--ink-3)}
+  .item .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .item .hd .id{font:600 13px/1 "Cascadia Mono",Consolas,monospace;color:var(--ink-3)}
+  .item .hd .ti{font-weight:600;font-size:15px}
+  .item p{margin:7px 0;font-size:14px}
+  .decide{border-left-color:var(--accent);background:#fbfdfd}
+  .quote{border-left:3px solid var(--line-strong);background:#eef1f4;padding:10px 14px;
+         margin:12px 0;font-size:13.5px;color:var(--ink-2);border-radius:0 8px 8px 0}
+  .foot{margin-top:46px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-3);font-size:13px}
+  .foot li{margin:5px 0}
+  h2 .sub{font-weight:400;font-size:13px;color:var(--ink-3);margin-left:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>VoxType Settings 界面对标报告</h1>
+  <div class="meta">
+    <b>对标对象</b>　<code>D:\GITHUB_melody0709\VoxType</code> → <code>src/ui/settings.cpp</code>（3448 行）<br>
+    <b>被评估对象</b>　本项目 <code>src/settings_dialog.cpp</code>（1458 行，main = <code>b6f58ee</code>）<br>
+    <b>日期</b>　2026-09-17　　<b>方法</b>　双侧源码逐行核对 + 全 git 历史 pickaxe + 已构建产物内嵌 manifest 逐字节提取<br>
+    <b>标注</b>　<span class="tag t-ok">已核实</span> 读过源码 / 二进制 / 全历史确认　<span class="tag t-warn">推断</span> 需实机截图确认
+  </div>
+</header>
+
+<div class="box" style="border-left:3px solid var(--accent);background:#fbfdfd">
+  <div class="k">跟踪状态 · 2026-09-17 更新</div>
+  <strong>配色已定：浅色，且自研（不照抄 VoxType 的色板）。布局方向已定：规则化（字段表 + 布局器）作为核心。</strong><br>
+  本文是<b>对标证据</b>，只回答"差异在哪、权重多大"。落地方案（metrics 常量表 / 字段表设计 /
+  浅色 token / 5 步实施 / 守卫影响 / 待决策项）见
+  <code>.plan/refactor/settings-ui-regularization-plan.md</code>。
+  §六 末尾的「决策项」已按上面的结论改写为「已定案」。
+</div>
+
+<h2>一、结论</h2>
+<div class="verdict">
+  <p><strong>VoxType 的 Settings 并不是新框架做的 —— 它仍然是 Win32 原生控件 + 手写 GDI 主题（3448 行）。
+  它比我们好看，不来自"架构更先进"，而来自三件我们从来没做过的小事：</strong></p>
+  <ol>
+    <li><strong>有 manifest</strong>，从而加载 <code>comctl32 v6</code> → Tab / 滑杆 / 下拉框 / 复选框走 Win10 原生外观；</li>
+    <li><strong>有 DPI 感知</strong>（PerMonitorV2 + <code>WM_DPICHANGED</code> + 缩放函数）；</li>
+    <li><strong>有一层统一的颜色 / 字体 token</strong>（一张色板 + 一种字体 + 统一标高）。</li>
+  </ol>
+  <p style="margin-top:14px">其中第 1 条我们<strong>完全缺失</strong>：设置窗口里的 Tab、滑杆、下拉框、复选框现在画的是
+  <strong>Windows 95 经典外观</strong>。第 2 条也完全缺失（见 §三 专项核对）。
+  这两条改动面都很小，却是权重最高的两条差异。</p>
+  <p style="margin-top:14px"><strong>VoxType 在本文中只承担一个作用：证明"这三件事在 Win32 原生控件上就够用"。</strong>
+  它的<u>外观与色板不被采纳</u> —— 我们按自己的设计语言（浅色，见方案文档 §3）落地。
+  因此下文各处"对齐 VoxType"一律读作"借用它已验证过的机制"，不是"照它的样子做"。</p>
+</div>
+
+<h2>二、核对 A：VoxType Settings 的技术栈 <span class="sub">先破一个误解</span></h2>
+<table>
+  <tr><th style="width:150px">项</th><th>VoxType 实际做法</th><th style="width:250px">证据</th></tr>
+  <tr><td>界面框架</td><td>Win32 原生控件（Tab / ComboBox / Edit / Button / Trackbar），<strong>无 Slint、无 Qt、无 WebView</strong></td><td class="n">settings.cpp:1863-1960</td></tr>
+  <tr><td>自绘程度</td><td>极低。只有一段 <code>WM_PAINT</code> 画页脚分隔线 + <code>WM_CTLCOLOR*</code> 改色；<strong>0 处 owner-draw 控件</strong></td><td class="n">settings.cpp:1790-1837</td></tr>
+  <tr><td>控件外观来源</td><td><code>app.manifest</code> 声明 PerMonitorV2 + Common-Controls v6；<code>RT_MANIFEST</code> 资源嵌入；链接期 <code>/MANIFEST:NO</code> 关掉自带的</td><td class="n">app.manifest:16-17<br>resources.rc:5<br>CMakeLists.txt:139</td></tr>
+  <tr><td>配色</td><td>设计的浅色板：底 <code>#F6F8FB</code> / 输入 <code>#FFFFFF</code> / 主文字 <code>#1E293B</code> / 分隔 <code>#E2E8F0</code> / 提示 <code>#788291</code></td><td class="n">ui_types.h:127-132</td></tr>
+  <tr><td>字体</td><td>统一 <strong>Segoe UI</strong>：正文 9pt / 标题 14pt Semibold / 小节 9pt Semibold，每个控件都过一遍 <code>ApplyUiFont()</code></td><td class="n">ui_theme.cpp:14-29<br>hotkey.cpp:325-330</td></tr>
+  <tr><td>尺寸与缩放</td><td>常量按 <strong>150% DPI 设计栅格</strong>书写（850×740），运行期乘 <code>dpi/144</code>；<strong>100% 缩放下实际约 567×493</strong></td><td class="n">ui_types.h:138-140<br>settings_controls.cpp:93-99</td></tr>
+  <tr><td>信息架构</td><td>5 个顶层 Tab + 子页按条件 <code>ShowWindow</code> 切换；每页只管自己那批控件</td><td class="n">settings.cpp:802-833</td></tr>
+  <tr><td>窗口</td><td><code>WS_CLIPCHILDREN</code>；<code>WM_SIZE</code> → 重排函数；<code>WM_DPICHANGED</code> 重排 + 重算缩放</td><td class="n">settings.cpp:3391-3401<br>settings.cpp:835-862</td></tr>
+</table>
+<p><strong>这一点很重要</strong>：它证明了"把原生设置窗口做好看"不需要换框架，只需要把 manifest、缩放、token 三层补齐。</p>
+
+<h2>三、核对 B：DPI 自适应 —— 是真的缺失，还是一直没有？ <span class="sub">四方取证，结论：从来没有</span></h2>
+
+<p>这一条值得单独取证，因为它很容易被误记成"以前有、被某次重构弄丢了"。结论是：
+<strong>VoxMic 从建立到现在，任何一次提交里都没有过 DPI 自适应代码，也从未有过 manifest 文件 ——
+不是重构丢的，是从来没写过。</strong>四条互相独立的证据：</p>
+
+<table>
+  <tr><th style="width:190px">取证路径</th><th>方法</th><th style="width:150px">结果</th></tr>
+  <tr>
+    <td>① 当前工作树</td>
+    <td>在 <code>src/ packaging/ cmake/ CMakeLists.txt</code> 全文检索 <code>dpi</code> / <code>MulDiv</code> / <code>LOGPIXELS</code></td>
+    <td><span class="tag t-bad">0 命中</span><br>仅 2 处假阳性（<code>PeekName<u>dPi</u>pe</code>）</td>
+  </tr>
+  <tr>
+    <td>② 重构前基线备份</td>
+    <td>同一检索跑在 <code>D:\GITHUB_melody0709\vox_mic\vox_mic.bak</code>（重构前快照）</td>
+    <td><span class="tag t-bad">0 命中</span><br>同一批假阳性</td>
+  </tr>
+  <tr>
+    <td>③ 全部 git 历史</td>
+    <td>pickaxe（<code>git log --all -S</code>）搜 <code>GetDpiForWindow</code> / <code>WM_DPICHANGED</code> / <code>dpiAware</code> / <code>SetProcessDpi</code>；并搜历史上是否新增过任何 <code>*.manifest</code></td>
+    <td><span class="tag t-bad">0 提交</span><br>manifest 文件从未存在</td>
+  </tr>
+  <tr>
+    <td>④ 已发布的 exe</td>
+    <td>从 <code>build/run/x64-release/voxmic.exe</code> 逐字节提取内嵌 manifest 并原样打印</td>
+    <td><span class="tag t-bad">仅 UAC 段</span><br>见下方原文</td>
+  </tr>
+</table>
+
+<p>第 ④ 条的原文如下 —— 这是整个 exe 里唯一的 manifest 内容，<strong>连一行 DPI 声明都没有</strong>：</p>
+
+<pre><span class="c">&lt;assembly xmlns='urn:schemas-microsoft-com:asm.v1' manifestVersion='1.0'&gt;
+  &lt;trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"&gt;
+    &lt;security&gt;
+      &lt;requestedPrivileges&gt;
+        &lt;requestedExecutionLevel level='asInvoker' uiAccess='false' /&gt;
+      &lt;/requestedPrivileges&gt;
+    &lt;/security&gt;
+  &lt;/trustInfo&gt;
+&lt;/assembly&gt;</span>
+
+<span class="c">dpiAware          -&gt; 0 命中
+PerMonitor        -&gt; 0 命中
+Common-Controls   -&gt; 0 命中
+supportedOS       -&gt; 0 命中</span></pre>
+
+<p>这份 manifest 是 MSVC 链接器在没有自定义 manifest 时自动生成的默认 UAC 段 ——
+也就是说，<strong>我们从来没有写过 manifest</strong>，才会有这个结果。</p>
+
+<h3>那为什么"感觉是自适应的"？</h3>
+<p>三个很可能叠在一起的原因：</p>
+<ul>
+  <li><strong>Windows 的 DPI 虚拟化在替我们兜底。</strong>DPI 不感知的进程会被系统按"虚拟 96 DPI"运行，
+      再由系统把整窗位图放大。表现是：<em>窗口大小看起来正常、不崩、不缩小</em> —— 但<strong>整窗连同文字一起被拉伸，发虚</strong>。
+      "没坏"很容易被读成"有自适应"，其实恰好相反：真实的自适应不会模糊。</li>
+  <li><strong>托盘图标是 Explorer 画的</strong>，始终清晰。只有设置窗口受影响，容易忽略。</li>
+  <li><strong>VoxType 确实有</strong>真 DPI 自适应（<code>app.manifest</code> 的 PerMonitorV2 + <code>WM_DPICHANGED</code>），
+      两个项目容易记混。</li>
+</ul>
+
+<div class="box">
+  <div class="k">影响范围</div>
+  100% 缩放下完全看不出来；125% / 150% / 175% 缩放下，设置窗口整体发虚（含文字与边框）；
+  在笔记本外接显示器、且两块屏缩放比例不同的场景下最明显（拖动窗口时还会跳变后被拉伸）。
+</div>
+
+<p class="quote"><strong>顺带发现（次要）</strong>：manifest 里连 <code>supportedOS</code> 都没有声明。
+这会让进程不向系统声明支持 Windows 8.1 / 10，版本探测类 API 会退化到兼容口径。
+本报告未展开，可作为一个独立小项另查。</p>
+
+<h2>四、现状对照表 <span class="sub">同样逐条落到行号</span></h2>
+<table>
+  <tr><th style="width:140px">项</th><th>VoxMic 现状</th><th style="width:230px">证据</th></tr>
+  <tr><td>界面框架</td><td>Win32 原生控件（与 VoxType 同代技术）</td><td class="n">settings_dialog.cpp:782+</td></tr>
+  <tr><td>控件外观版本</td><td><span class="tag t-bad">缺失</span> manifest 无 Common-Controls v6 → 回退 <code>comctl32 v5.82</code> → 经典外观</td><td class="n">见 §三 第 ④ 条</td></tr>
+  <tr><td>DPI 感知</td><td><span class="tag t-bad">从未有过</span> 见 §三 四方取证</td><td class="n">全历史 0 命中</td></tr>
+  <tr><td>配色</td><td>纯系统色：窗口底 <code>COLOR_BTNFACE</code>，只有输入框刷成纯白；无 token 层</td><td class="n">settings_dialog.cpp:1433<br>:1194-1257</td></tr>
+  <tr><td>字体</td><td><strong>两套字体混用</strong>：小节标题与提示用 <code>MS Shell Dlg</code> 写死 16px；其余控件从未设字体，走系统默认</td><td class="n">settings_dialog.cpp:787-792<br>:849 / :976 / :1096</td></tr>
+  <tr><td>尺寸与缩放</td><td>固定 500×565，绝对坐标手填；无缩放函数、无 <code>WM_SIZE</code> 重排，窗口不可调整</td><td class="n">settings_dialog.cpp:1436-1442</td></tr>
+  <tr><td>控件高度</td><td><strong>不统一</strong>：输入框 21 / 标签 22 / 滑杆 24 / 按钮 25 px</td><td class="n">settings_dialog.cpp:882<br>:871 / :921</td></tr>
+  <tr><td>分组视觉</td><td>小节标题用 <code>SS_ETCHEDHORZ</code>（Win95 蚀刻横线）；分区用 <code>BS_GROUPBOX</code></td><td class="n">settings_dialog.cpp:852-855<br>:972-978</td></tr>
+  <tr><td>页脚 / 状态区</td><td><span class="tag t-bad">缺失</span> 无分隔线、无状态文字位，4 个按钮平铺在固定 <code>y=490</code></td><td class="n">settings_dialog.cpp:1107-1124</td></tr>
+  <tr><td>信息架构</td><td>2 个 Tab（General / DSP），DSP 全部平铺在 3 个分组框里</td><td class="n">settings_dialog.cpp:805-814</td></tr>
+  <tr><td>键盘可达</td><td><span class="tag t-bad">缺失</span> <code>WS_TABSTOP</code> 0 处、<code>WS_GROUP</code> 0 处 → <strong>Tab 键无法在字段间移动</strong></td><td class="n">全文计数</td></tr>
+  <tr><td>双缓冲</td><td>窗口无 <code>WS_CLIPCHILDREN</code>，切页有闪烁风险</td><td class="n">settings_dialog.cpp:1440</td></tr>
+</table>
+
+<h2>五、决定性差异 <span class="sub">按对"好看"的贡献排序，不是按代码量排序</span></h2>
+<table>
+  <tr>
+    <th style="width:36px">#</th><th style="width:130px">维度</th>
+    <th>为什么它决定观感</th><th style="width:96px">权重</th>
+  </tr>
+  <tr>
+    <td class="n">1</td><td><b>控件外观版本</b></td>
+    <td>缺 <code>comctl32 v6</code> 时，Tab 是直角无渐变的方块页签、滑杆是 3D 斜面凹槽、下拉框是灰色立体边框。
+        这一项不改动任何代码结构，却决定"这是 1995 年的控件还是 2020 年的控件"。</td>
+    <td class="star">★★★★★</td>
+  </tr>
+  <tr>
+    <td class="n">2</td><td><b>DPI 感知</b></td>
+    <td>非 100% 缩放下整窗被系统位图拉伸，文字与边框全部发虚。与配色无关，却直接决定"精致还是糊"。</td>
+    <td class="star">★★★★☆</td>
+  </tr>
+  <tr>
+    <td class="n">3</td><td><b>颜色与字体 token</b></td>
+    <td>VoxType 靠一张 6 色色板 + 单一 Segoe UI 就把原生控件"抬"起来；我们是系统灰底 + 两套字体混用。</td>
+    <td class="star">★★★★☆</td>
+  </tr>
+  <tr>
+    <td class="n">4</td><td><b>行距与控件高度节奏</b></td>
+    <td>VoxType 是统一栅格（每种角色一个唯一高度）；我们逐控件手填坐标，21/22/24/25 四种高度混排，
+        视觉上"对不齐"主要来自这里。</td>
+    <td class="star">★★★☆☆</td>
+  </tr>
+  <tr>
+    <td class="n">5</td><td><b>页脚与状态区</b></td>
+    <td>VoxType 有分隔线 + 左侧状态文字 + 右侧主次按钮，窗口有明确的"底部收口"；
+        我们的按钮悬在固定 y 坐标上，下方留白不规则，且不随窗口尺寸变化。</td>
+    <td class="star">★★★☆☆</td>
+  </tr>
+  <tr>
+    <td class="n">6</td><td><b>信息架构</b></td>
+    <td>VoxType 5 个 Tab + 子页按条件显隐，每页都很稀疏；我们 2 个 Tab 把全部内容压进一列，
+        密度过高会放大上面所有缺点。</td>
+    <td class="star">★★★☆☆</td>
+  </tr>
+  <tr>
+    <td class="n">7</td><td><b>文字层级</b></td>
+    <td>VoxType 有独立的"提示文字"通道（更浅的灰 + <code>SetPropW</code> 标记）；
+        我们用蚀刻横线 + 粗体老字体做标题，层级靠"线"而不是靠"字重"。</td>
+    <td class="star">★★☆☆☆</td>
+  </tr>
+  <tr>
+    <td class="n">8</td><td><b>键盘可达</b></td>
+    <td><span class="tag t-warn">不是差异</span> 两边都没做好：我们 <code>WS_TABSTOP</code> 为 0，
+        VoxType 也只有 <code>CreateCheckBox</code> 一处加了。属独立改进项，别当作对标依据。</td>
+    <td class="star">★★☆☆☆</td>
+  </tr>
+</table>
+
+<h2>六、优化清单 <span class="sub">必做叠加项 + 一项已定案</span></h2>
+
+<p style="color:var(--ink-2)">
+P0 / P1 / P2 是<strong>叠加项</strong>，彼此不冲突，也与配色无关；
+末尾的<strong>配色与布局方向已定案</strong>（浅色自研 + 规则化），已不再是选择题。
+</p>
+
+<div class="item p0">
+  <div class="hd"><span class="id">P0-1</span><span class="ti">补 manifest：启用 comctl32 v6 + PerMonitorV2</span><span class="tag t-bad">最高性价比</span></div>
+  <p><strong>怎么改</strong>（沿用 VoxType 已验证过的接线方式，三段式）：新增 <code>src/app.manifest</code>，声明
+     <code>dpiAwareness = PerMonitorV2</code> 与 <code>Microsoft.Windows.Common-Controls 6.0.0.0</code> 依赖；
+     在 <code>src/voxmic.rc</code> 里加 <code>1 RT_MANIFEST "app.manifest"</code>；
+     <code>CMakeLists.txt</code> 给 voxmic 加链接选项 <code>/MANIFEST:NO</code>。</p>
+  <p><strong>为什么必须<u>同时</u>做 v6 与 DPI</strong>：v6 解决"控件长什么样"，DPI 解决"清不清晰"，
+     两者共用同一份 manifest，分两次做等于改两遍文件、测两遍。</p>
+  <p><strong>风险与必须验证的点</strong>：切到 v6 后所有控件改用视觉样式重绘，现有
+     <code>WM_CTLCOLORSTATIC / EDIT / LISTBOX</code> 的着色行为需要重新确认；代码里已有一条关于滑杆底刷的警告注释
+     （<code>settings_dialog.cpp:1229-1232</code>），必须实测滑杆是否出现黑条。
+     <span class="tag t-warn">推断</span> 切换后的实际观感需改前 / 改后各截一张同页面截图确认。</p>
+</div>
+
+<div class="item p0">
+  <div class="hd"><span class="id">P0-2</span><span class="ti">DPI 缩放：把裸坐标换成设计常量 + 缩放函数</span></div>
+  <p><strong>怎么改</strong>：引入 <code>DpiScaleForWindow()</code> 与 <code>S()</code>（对齐 VoxType
+     <code>settings_controls.cpp:93-99</code> 与 <code>ui_utils.h:10-18</code>），把散在
+     <code>WM_CREATE</code> 里的裸数字（<code>25 / 64 / 92 / 120 / 205 …</code>）抽成一张常量表，
+     所有创建调用统一包一层 <code>S()</code>；补 <code>WM_DPICHANGED</code> 重排。</p>
+  <p><strong>字体同步</strong>：字号改为按 DPI 计算 <code>-MulDiv(pt, dpi, 72)</code>，不要再写死像素高度。</p>
+  <p><strong>验收口径</strong>：在 100% / 125% / 150% 三档缩放下各截一张，要求文字边缘锐利、无位图拉伸痕迹。</p>
+</div>
+
+<div class="item p1">
+  <div class="hd"><span class="id">P1-3</span><span class="ti">统一字体：一套 Segoe UI，去掉混用</span></div>
+  <p>现在小节标题与提示用 <code>MS Shell Dlg</code> 写死 16px，其余控件从不设字体。
+     改为：正文 Segoe UI 9pt、小节标题 9pt Semibold，<strong>所有控件创建后都过一遍统一的
+     <code>ApplyUiFont()</code></strong>（可照抄 VoxType <code>hotkey.cpp:325-330</code>）。
+     提示文字用灰阶差（而不是字号差）做层级。</p>
+  <p class="quote"><code>MS Shell Dlg</code> 是 GDI 的传统字体别名，<span class="tag t-warn">推断</span>
+     其映射目标不是 Segoe UI。本条未在本机复核 —— 读取字体映射表需要 <code>reg.exe</code>，该程序在本沙箱被安全策略拦截。
+     <strong>但不影响结论</strong>：无论映射到谁，硬编码 16px 都不随 DPI 与系统字体设置变化。</p>
+</div>
+
+<div class="item p1">
+  <div class="hd"><span class="id">P1-4</span><span class="ti">布局规则化（原"统一控件高度"，范围已扩大）</span><span class="tag t-acc">核心</span></div>
+  <p><strong>这一条已从"表层修补"升级为本次的核心。</strong>起因是：现在新增一个设置项要改
+     <strong>4 处</strong>（坐标 / 字体 / 加载 / 保存），任何一处漏掉就是 bug，且坐标靠人眼对齐 ——
+     这正是"以后新增选项又会全部自定义、导致混乱"的机制原因。只统一几个高度值治不了它。</p>
+  <p><strong>做法</strong>：三层结构 —— metrics 常量表（唯一的尺寸来源，按 DPI 缩放）→
+     字段表（每个设置项只声明"是什么"：<code>id / label / kind / hint / dependsOn</code>）→
+     布局器（唯一一处算坐标，按声明顺序顺推）。同时把依赖态从三个手写 setter
+     （现约 146 行）收成一次统一的 <code>applyFieldStates()</code>。</p>
+  <p><strong>验收口径</strong>：新增一个设置项 = <strong>只改 1 处</strong>（字段表加一条记录），
+     不写坐标、不写 <code>ShowWindow</code>。完整设计（metrics 值、行高三档、字段表结构、
+     依赖态求值、新文件落点）见方案文档 §2。</p>
+</div>
+
+<div class="item p1">
+  <div class="hd"><span class="id">P1-5</span><span class="ti">补页脚区：分隔线 + 状态位 + 按钮靠右</span></div>
+  <p>VoxType 在 <code>WM_PAINT</code> 里用 <code>DividerColor</code> 画一条页脚分隔线，状态文字靠左、
+     按钮靠右，页脚位置由客户区高度推导（<code>LayoutSettingsWindow</code>）。我们现在是 4 个按钮平铺在
+     固定 <code>y=490</code>，窗口尺寸一变就错位。顺带补 <code>WS_CLIPCHILDREN</code> 消除切页闪烁。</p>
+</div>
+
+<div class="item p2">
+  <div class="hd"><span class="id">P2-6</span><span class="ti">键盘可达：补 Tab 序</span></div>
+  <p>加 <code>WS_TABSTOP</code> / <code>WS_GROUP</code>，窗口加 <code>WS_EX_CONTROLPARENT</code>
+     并在消息循环里走 <code>IsDialogMessage</code>。
+     <span class="tag t-warn">注意</span> 这是两边的共同缺陷，属独立改进，不算对标收益。</p>
+</div>
+
+<div class="item p2">
+  <div class="hd"><span class="id">P2-7</span><span class="ti">提示文字改用窗口属性标记</span></div>
+  <p>现在是维护一个 <code>hintControls</code> 向量再线性查找；VoxType 用
+     <code>SetPropW</code> 打标记、<code>WM_CTLCOLORSTATIC</code> 里查属性
+     （<code>settings_controls.cpp:101-107</code>），少一份需要同步维护的清单。顺手为之即可。</p>
+</div>
+
+<div class="item decide">
+  <div class="hd"><span class="id">已定案</span><span class="ti">配色 = 浅色，且自研 —— 不照抄 VoxType</span><span class="tag t-ok">用户已决定</span></div>
+  <p><strong>决定：配色走浅色，但不复制 VoxType 的色板 —— 按本项目自己的设计语言翻成浅色版本。</strong>
+     本项因此不再是二选一。落地色值见方案文档 §3：<em>结构沿用已定的 4px 基准网格 / 11–17px 字号阶梯 /
+     4-8-14px 圆角 / 状态色绑定引擎真实状态，只把基色由深翻浅</em>；深色基色作废，不留分支。</p>
+  <p><strong>方向定案带来一个范围变化</strong>：既然 Slint 已放弃、Win32 设置窗口就是长期界面，
+     本次就不是"先做结构、配色留给将来的重写"，而是一次做到位 —— 并且把
+     <strong>布局规则化</strong>（字段表 + 布局器）当成<u>核心</u>来做，而不是"统一几个控件高度"这种表层修补。
+     依据见 §四：<em>现在新增一个设置项要改 4 处</em>（坐标 / 字体 / 加载 / 保存），这是"新增即混乱"的机制原因。</p>
+  <p><strong>本文 P 编号 → 方案 S 步骤的对应关系</strong>（避免两份文档看起来矛盾）：</p>
+  <table>
+    <tr><th style="width:180px">本文条目</th><th style="width:150px">并入方案步骤</th><th>变化</th></tr>
+    <tr><td>P0-1 + P0-2</td><td><b>S1 + S2</b></td><td>不变。两条共用一份 manifest，必须一起做</td></tr>
+    <tr><td>P1-4 统一控件高度</td><td><b>S3 布局规则化</b></td><td><b>范围扩大</b>：从"统一高度"升级为"字段表 + 布局器 + 依赖态求值"</td></tr>
+    <tr><td>P1-3 统一字体</td><td><b>S4 浅色 token</b></td><td>合并：字体是 token 层的一部分</td></tr>
+    <tr><td>P1-5 页脚 + P2-6 键盘可达</td><td><b>S5</b></td><td>合并。前者属结构、后者属可达性，同批改完一起验证</td></tr>
+    <tr><td>P2-7 hint 标记法</td><td><b>S3</b></td><td>并入：布局器持有 <code>id → HWND</code> 映射后，独立的 hint 清单自然消失</td></tr>
+  </table>
+  <p><strong>另外两条必须同时记住的事实：</strong></p>
+  <ul>
+    <li><span class="tag t-ok">已核实</span> <strong>Slint 重构已放弃。</strong>证据：
+        <code>ui/</code> 目录不存在；<code>CMakeLists.txt</code> / <code>build.bat</code> 内 <code>slint</code> 0 命中；
+        B4 / B5 的工作完整保存在 <code>slint-ui-experiment</code> 分支（<code>025ecec</code>、<code>5019d94</code>），
+        main 已回退到 C++23 稳定化路线（现 HEAD <code>b6f58ee</code>）。</li>
+    <li><span class="tag t-bad">文档缺陷</span> <code>.plan/refactor/cxx23-slint-refactor-plan.md</code>
+        <strong>仍是旧状态</strong>：§13 把 B4「接入 Slint」、B5「主题 + 迁移配置项」写成待做，
+        附录还整段保留着为 Slint 设计的深色 token。该文件最后一次提交是 <code>0bc5b32</code>（B3），
+        放弃决定没有回写进去。<strong>建议一并修正</strong>：标记为已被本方案取代并移入
+        <code>.plan/completed/</code>，或就地记录"视觉规范结构沿用、Slint 实现与深色基色作废"。</li>
+  </ul>
+</div>
+
+<h2>七、不建议照抄的部分</h2>
+<table>
+  <tr><th style="width:230px">VoxType 的做法</th><th>为什么不要抄</th></tr>
+  <tr>
+    <td>单文件 3448 行的设置界面，其中 <code>SettingsWndProc</code> 一个 switch 跨 <strong>1636 行</strong>（1782–3418）</td>
+    <td>比我们现在的 1458 行更糟。它"好看"和它"难维护"是两件独立的事，只抄前者。</td>
+  </tr>
+  <tr>
+    <td>18 个全局 <code>std::vector&lt;HWND&gt;</code> 控件分组，经头文件 <code>extern</code> 暴露</td>
+    <td>我们 B3 刚把 <code>extern</code> 从 30 清到 0 并收死守卫基线。抄回去等于架构倒退。</td>
+  </tr>
+  <tr>
+    <td>控件创建直接散在 <code>WM_CREATE</code> 内联展开</td>
+    <td>它在 <code>settings_controls.cpp</code> 里其实有一层不错的控件工厂，但主流程并未全部走工厂 —— 半途而废的做法不值得学。</td>
+  </tr>
+</table>
+
+<h2>八、建议的执行顺序 <span class="sub">对应方案文档的 S1–S5</span></h2>
+<ol>
+  <li><strong>S1+S2（manifest + DPI）</strong>，一次提交。改前 / 改后各截一张设置窗口同页截图。
+      也是唯一能一次把"Win95 控件"变成"Win10 控件"的动作。</li>
+  <li><strong>S3（布局规则化）</strong>，独立一次提交。判据是<strong>零视觉变化</strong>：
+      布局器摆出来的位置应与现在肉眼一致 —— 这样才能把"结构对不对"与"配色好不好看"分开验证。</li>
+  <li><strong>S4（浅色 token）</strong>，替换全部系统色与硬编码色，验收要求无 <code>COLOR_*</code> 残留。</li>
+  <li><strong>S5（页脚 + 键盘可达）</strong>，页脚分隔线与状态位、<code>WS_TABSTOP</code> 与 Tab 序。</li>
+  <li><strong>顺手修计划文档</strong>：把 <code>cxx23-slint-refactor-plan.md</code> 的状态改到与事实一致（见 §六）。</li>
+</ol>
+<p style="color:var(--ink-2)">S1+S2 改动面很小（一个 manifest + 一个缩放函数 + 一张常量表），却覆盖了权重最高的两条差异 ——
+   想用最小代价先把观感拉起来，就是这两步。</p>
+
+<div class="foot">
+  <strong>证据标注说明</strong>
+  <ul>
+    <li><span class="tag t-ok">已核实</span>：来自两侧源码逐行核对、全 git 历史 pickaxe、或对已构建产物
+        <code>voxmic.exe</code> 的内嵌 manifest 做逐字节提取（原文见 §三）。</li>
+    <li><span class="tag t-warn">推断</span>：共两处 —— (a) 切到 comctl32 v6 后的实际观感；
+        (b) <code>MS Shell Dlg</code> 的字体映射目标。两处都需实机截图或放开 <code>reg.exe</code> 才能定案，已在文中逐条标出。</li>
+    <li>本报告只回答"哪里可以优化"，未修改任何源码。</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
