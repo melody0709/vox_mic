@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <string>
 
 extern "C" {
@@ -72,9 +73,9 @@ public:
         return true;
     }
 
-    void process(float* samples, int numSamples, float sampleRate) {
-        if (numSamples != 480) {
-            processFallback(samples, numSamples, sampleRate);
+    void process(std::span<float> samples, float sampleRate) {
+        if (samples.size() != 480) {
+            processFallback(samples, sampleRate);
             return;
         }
 
@@ -114,7 +115,7 @@ public:
         }
 
         if (!nrOn) {
-            processPostDenoise(samples, numSamples);
+            processPostDenoise(samples);
             return;
         }
 
@@ -134,7 +135,7 @@ public:
                 } else if (haveOutput) {
                     m_dpdfnetSeenOutput = true;
                     m_consecutiveDpdfnetUnderflows = 0;
-                    std::memcpy(samples, denoised, sizeof(denoised));
+                    std::memcpy(samples.data(), denoised, sizeof(denoised));
                 } else if (recordDpdfnetUnderflow()) {
                     char detail[112];
                     snprintf(detail, sizeof(detail),
@@ -147,14 +148,14 @@ public:
                     // reset. A bounded warm-up silence keeps its delayed
                     // stream aligned without allowing a stuck worker to mute
                     // the microphone indefinitely.
-                    std::memset(samples, 0, sizeof(denoised));
+                    std::memset(samples.data(), 0, sizeof(denoised));
                 }
             }
         } else {
             processRnnoise(samples);
         }
 
-        processPostDenoise(samples, numSamples);
+        processPostDenoise(samples);
     }
 
     bool dpdfnetReady() const { return m_dpdfnet.isReady(); }
@@ -185,8 +186,10 @@ private:
         return DenoiseBackendKind::Rnnoise;
     }
 
-    void processRnnoise(float* samples) {
-        if (m_rnnoise) rnnoise_process_frame(m_rnnoise, samples, samples);
+    void processRnnoise(std::span<float> samples) {
+        if (m_rnnoise) {
+            rnnoise_process_frame(m_rnnoise, samples.data(), samples.data());
+        }
     }
 
     bool recordDpdfnetUnderflow() {
@@ -270,28 +273,28 @@ private:
         resetPostDenoiseState();
     }
 
-    void processFallback(float* samples, int numSamples, float sampleRate) {
+    void processFallback(std::span<float> samples, float sampleRate) {
         (void)sampleRate;
         if (!m_loggedFallbackSize) {
-            printf("[DSP] warning: unsupported denoise block size=%d; denoise bypassed\n",
-                numSamples);
+            printf("[DSP] warning: unsupported denoise block size=%zu; denoise bypassed\n",
+                samples.size());
             m_loggedFallbackSize = true;
         }
-        processPostDenoise(samples, numSamples);
+        processPostDenoise(samples);
     }
 
-    void processPostDenoise(float* samples, int numSamples) {
+    void processPostDenoise(std::span<float> samples) {
         const bool eqOn = g_appState.eqEnabled.load(std::memory_order_relaxed);
         const bool compOn = g_appState.compressorEnabled.load(std::memory_order_relaxed);
         if (eqOn) {
-            for (int i = 0; i < numSamples; i++) {
+            for (size_t i = 0; i < samples.size(); i++) {
                 float x = samples[i];
                 for (auto& bq : m_bq) x = bq.process(x);
                 samples[i] = x;
             }
         }
-        if (compOn) processCompressor(samples, numSamples);
-        processLimiter(samples, numSamples);
+        if (compOn) processCompressor(samples);
+        processLimiter(samples);
     }
 
     struct CompState {
@@ -321,7 +324,7 @@ private:
     CompState m_comp;
     float m_limiterGain = 1.0f;
 
-    void processCompressor(float* samples, int numSamples) {
+    void processCompressor(std::span<float> samples) {
         const float thresholdDb = -18.0f;
         const float ratio = 3.0f;
         const float kneeDb = 6.0f;
@@ -330,7 +333,7 @@ private:
         const float rmsMs = 10.0f;
         const float makeupDb = 5.0f;
         const float rmsCoeff = expf(-1.0f /
-            (0.001f * rmsMs * 48000.0f / numSamples));
+            (0.001f * rmsMs * 48000.0f / static_cast<float>(samples.size())));
         const float attCoeff = expf(-1.0f /
             (0.001f * attackMs * 48000.0f));
         const float relCoeff = expf(-1.0f /
@@ -339,7 +342,7 @@ private:
         const float slope = 1.0f - 1.0f / ratio;
         const float makeupGain = powf(10.0f, makeupDb / 20.0f);
 
-        for (int i = 0; i < numSamples; i++) {
+        for (size_t i = 0; i < samples.size(); i++) {
             float x = samples[i];
             float x2 = x * x;
             m_comp.rmsState += rmsCoeff * (x2 - m_comp.rmsState);
@@ -359,10 +362,10 @@ private:
         }
     }
 
-    void processLimiter(float* samples, int numSamples) {
+    void processLimiter(std::span<float> samples) {
         const float ceiling = 0.89125094f;
         const float releaseCoeff = 0.995f;
-        for (int i = 0; i < numSamples; i++) {
+        for (size_t i = 0; i < samples.size(); i++) {
             float x = samples[i];
             float absX = fabsf(x);
             if (absX * m_limiterGain > ceiling)

@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
         samples[i] = 0.05f * std::sin(
             2.0f * 3.14159265358979323846f * 220.0f * i / 48000.0f);
     }
-    pipeline.process(samples, 480, 48000.0f);
+    pipeline.process(samples, 48000.0f);
 
     const int effective = g_appState.denoiseEffectiveBackend.load(
         std::memory_order_acquire);

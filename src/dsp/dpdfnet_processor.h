@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 
 // DPDFNet's online API consumes 480 samples at 48 kHz for the model selected
@@ -34,7 +35,11 @@ public:
     // the worker.  Returns true only when a denoised 480-sample block for the
     // same epoch is available in the output FIFO; otherwise output is filled
     // with silence and the worker catches up without blocking WASAPI.
-    bool processBlock(const float* input, float* output, uint64_t epoch);
+    //
+    // Both slices must hold at least DPDFNET_BLOCK_SAMPLES floats; a shorter
+    // one is rejected rather than read past its end.
+    bool processBlock(std::span<const float> input, std::span<float> output,
+        uint64_t epoch);
 
     bool isReady() const;
     bool hasFailed() const;

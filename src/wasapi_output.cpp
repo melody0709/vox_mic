@@ -209,7 +209,7 @@ void WASAPIOutput::renderThread() {
                 for (int i = 0; i < FRAMES_PER_BLOCK; i++)
                     floatBuf[i] = (float)monoBuffer[i] / 32768.0f;
 
-                m_pipeline.process(floatBuf, FRAMES_PER_BLOCK, (float)SAMPLE_RATE);
+                m_pipeline.process(floatBuf, (float)SAMPLE_RATE);
 
                 if (isFloat) {
                     float* out = (float*)pData;

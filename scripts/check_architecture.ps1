@@ -35,18 +35,20 @@ $CMake = Join-Path $Root 'CMakeLists.txt'
 # Payback status, rechecked after the Slint work was dropped:
 #   main.cpp - PAID BACK. 638 lines, under the pre-B2 650, so the ceiling is
 #     restored to 650 instead of being left at the 655 it was raised to.
-#   dpdfnet_processor.cpp - STANDING DEBT. Still 814 against a pre-B2 728. The
-#     +86 buys the abandoned-worker handling. The plan repaid it with a backend
-#     abstraction in step B5, which was cancelled when Slint was dropped, so
-#     nothing pays it now. This file sits exactly ON its baseline: the next
-#     line added here fails the guard until the debt is repaid (by extracting
-#     the abandon logic) or the baseline is re-raised with a recorded decision.
+#   dpdfnet_processor.cpp - PARTLY PAID BACK. 814 -> 791 by extracting the
+#     sherpa-onnx dynamic loader into src/dsp/sherpa_onnx_api.h, which is a
+#     genuinely separate responsibility (resolve entry points out of an
+#     optional DLL vs run the model). The remaining ~63 over the pre-B2 728 is
+#     the abandoned-worker handling. Nothing repays that any more now that B5
+#     is cancelled, so it is accepted explicitly here rather than left as a
+#     promise to a step that will never run.
 $LineBaselines = @{
     'AGENTS.md'                     = 145   # loaded in full every session; keep it a rule sheet, not a manual
     'src/settings_dialog.cpp'       = 1458
     'src/main.cpp'                  = 650   # pre-B2 value, restored; actual 638
     'src/mic_usage_monitor.cpp'     = 652
-    'src/dsp/dpdfnet_processor.cpp' = 814   # pre-B2: 728 - standing debt, see above
+    'src/dsp/dpdfnet_processor.cpp' = 791   # pre-B2: 728; 63 lines of accepted debt, see above
+    'src/dsp/sherpa_onnx_api.h'     = 80    # extracted dynamic loader
 }
 
 # Measured 2026-09-17. Ratchet: these may only go DOWN. Raising one requires

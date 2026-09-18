@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <stop_token>
 #include <thread>
 #include <vector>
@@ -17,6 +18,8 @@
 #define VOXMIC_ENABLE_DPDFNET 0
 #endif
 
+#include "dsp/sherpa_onnx_api.h"
+
 #if VOXMIC_ENABLE_DPDFNET
 #include <sherpa-onnx/c-api/c-api.h>
 #endif
@@ -24,45 +27,6 @@
 namespace {
 
 #if VOXMIC_ENABLE_DPDFNET
-// The public header supplies the exact pinned C ABI layout.  VoxMic still
-// resolves every function dynamically, so optional DLLs are never loader
-// dependencies of the main executable.
-struct SherpaOnnxApi {
-    using CreateFn = const SherpaOnnxOnlineSpeechDenoiser* (__cdecl*)(
-        const SherpaOnnxOnlineSpeechDenoiserConfig*);
-    using DestroyFn = void (__cdecl*)(const SherpaOnnxOnlineSpeechDenoiser*);
-    using GetSampleRateFn = int32_t (__cdecl*)(
-        const SherpaOnnxOnlineSpeechDenoiser*);
-    using GetFrameShiftFn = int32_t (__cdecl*)(
-        const SherpaOnnxOnlineSpeechDenoiser*);
-    using RunFn = const SherpaOnnxDenoisedAudio* (__cdecl*)(
-        const SherpaOnnxOnlineSpeechDenoiser*, const float*, int32_t, int32_t);
-    using ResetFn = void (__cdecl*)(const SherpaOnnxOnlineSpeechDenoiser*);
-    using DestroyAudioFn = void (__cdecl*)(const SherpaOnnxDenoisedAudio*);
-
-    HMODULE module = nullptr;
-    CreateFn create = nullptr;
-    DestroyFn destroy = nullptr;
-    GetSampleRateFn getSampleRate = nullptr;
-    GetFrameShiftFn getFrameShift = nullptr;
-    RunFn run = nullptr;
-    ResetFn reset = nullptr;
-    DestroyAudioFn destroyAudio = nullptr;
-
-    void unload() {
-        if (module) {
-            FreeLibrary(module);
-            module = nullptr;
-        }
-        create = nullptr;
-        destroy = nullptr;
-        getSampleRate = nullptr;
-        getFrameShift = nullptr;
-        run = nullptr;
-        reset = nullptr;
-        destroyAudio = nullptr;
-    }
-};
 
 static std::string wideToUtf8(const std::wstring& value) {
     if (value.empty()) return {};
@@ -116,13 +80,14 @@ public:
         float samples[DPDFNET_BLOCK_SAMPLES]{};
     };
 
-    bool push(uint64_t epoch, const float* samples) {
+    bool push(uint64_t epoch, std::span<const float> samples) {
+        if (samples.size() < DPDFNET_BLOCK_SAMPLES) return false;
         const size_t write = m_write.load(std::memory_order_relaxed);
         const size_t next = (write + 1) % Capacity;
         if (next == m_read.load(std::memory_order_acquire)) return false;
 
         m_blocks[write].epoch = epoch;
-        std::memcpy(m_blocks[write].samples, samples,
+        std::memcpy(m_blocks[write].samples, samples.data(),
             sizeof(m_blocks[write].samples));
         m_write.store(next, std::memory_order_release);
         return true;
@@ -235,10 +200,10 @@ struct DpdfnetProcessor::Impl {
         // retaining the queue preserves the new epoch's first block.
     }
 
-    void appendOutput(const float* samples, int32_t count, uint64_t epoch) {
-        if (!samples || count <= 0) return;
+    void appendOutput(std::span<const float> samples, uint64_t epoch) {
+        if (samples.empty()) return;
         size_t offset = 0;
-        while (offset < static_cast<size_t>(count)) {
+        while (offset < samples.size()) {
             const size_t freeSpace = FIFO_CAPACITY - outputFifoCount;
             if (freeSpace == 0) {
                 outputDrops.fetch_add(1, std::memory_order_relaxed);
@@ -246,15 +211,17 @@ struct DpdfnetProcessor::Impl {
                 break;
             }
             const size_t copyCount = (std::min)(freeSpace,
-                static_cast<size_t>(count) - offset);
+                samples.size() - offset);
             std::memcpy(outputFifo.data() + outputFifoCount,
-                samples + offset, copyCount * sizeof(float));
+                samples.data() + offset, copyCount * sizeof(float));
             outputFifoCount += copyCount;
             offset += copyCount;
         }
 
         while (outputFifoCount >= DPDFNET_BLOCK_SAMPLES) {
-            if (!outputQueue.push(epoch, outputFifo.data())) {
+            const std::span<const float> drained(outputFifo.data(),
+                DPDFNET_BLOCK_SAMPLES);
+            if (!outputQueue.push(epoch, drained)) {
                 outputDrops.fetch_add(1, std::memory_order_relaxed);
             }
             outputFifoCount -= DPDFNET_BLOCK_SAMPLES;
@@ -385,7 +352,10 @@ struct DpdfnetProcessor::Impl {
                 api.destroyAudio(audio);
                 continue;
             }
-            appendOutput(audio->samples, audio->n, workerEpoch);
+            appendOutput(
+                std::span<const float>(audio->samples,
+                    static_cast<size_t>(audio->n)),
+                workerEpoch);
             api.destroyAudio(audio);
         }
 
@@ -670,17 +640,24 @@ void DpdfnetProcessor::setEpoch(uint64_t epoch) {
 #endif
 }
 
-bool DpdfnetProcessor::processBlock(const float* input, float* output,
-    uint64_t epoch) {
+bool DpdfnetProcessor::processBlock(std::span<const float> input,
+    std::span<float> output, uint64_t epoch) {
 #if !VOXMIC_ENABLE_DPDFNET
     (void)input;
     (void)epoch;
-    if (output) std::memset(output, 0, DPDFNET_BLOCK_SAMPLES * sizeof(float));
+    if (output.size() >= DPDFNET_BLOCK_SAMPLES) {
+        std::memset(output.data(), 0, DPDFNET_BLOCK_SAMPLES * sizeof(float));
+    }
     return false;
 #else
-    if (!output) return false;
-    std::memset(output, 0, DPDFNET_BLOCK_SAMPLES * sizeof(float));
-    if (!input) return false;
+    // A span carries its length, so an undersized slice is rejected here
+    // instead of being read past its end. That is strictly stronger than the
+    // null check this replaces.
+    if (output.size() < DPDFNET_BLOCK_SAMPLES ||
+        input.size() < DPDFNET_BLOCK_SAMPLES) {
+        return false;
+    }
+    std::memset(output.data(), 0, DPDFNET_BLOCK_SAMPLES * sizeof(float));
     if (!m_impl->ready.load(std::memory_order_acquire) ||
         m_impl->failed.load(std::memory_order_acquire)) {
         return false;
@@ -695,7 +672,7 @@ bool DpdfnetProcessor::processBlock(const float* input, float* output,
     TaggedBlockQueue<Impl::QUEUE_CAPACITY>::Block block;
     while (m_impl->outputQueue.pop(block)) {
         if (block.epoch == epoch) {
-            std::memcpy(output, block.samples,
+            std::memcpy(output.data(), block.samples,
                 DPDFNET_BLOCK_SAMPLES * sizeof(float));
             return true;
         }

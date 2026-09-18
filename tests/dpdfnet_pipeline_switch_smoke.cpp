@@ -34,7 +34,7 @@ static void fillInput(float* samples, int block, float amplitude = 0.08f) {
 static bool processOne(DspPipeline& pipeline, int block, unsigned int sleepMs) {
     float samples[DPDFNET_BLOCK_SAMPLES];
     fillInput(samples, block);
-    pipeline.process(samples, DPDFNET_BLOCK_SAMPLES, 48000.0f);
+    pipeline.process(samples, 48000.0f);
     for (float sample : samples) {
         if (!std::isfinite(sample)) return false;
     }
