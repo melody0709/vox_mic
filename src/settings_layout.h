@@ -44,11 +44,15 @@ public:
     // Re-emits every widget at the current DPI scale. Call after setDpi().
     void relayout(HWND parent);
 
-    void destroyFonts();
+    // Frees the fonts and brushes this layout created.
+    void destroyResources();
 
     HWND control(int id) const;  // the interactive control, by id
     HWND hint(int id) const;     // the hint line of the field with that id
     HWND footerButton(int id) const;
+
+    HBRUSH windowBrush() const { return m_windowBrush; }
+    HBRUSH panelBrush() const { return m_panelBrush; }
 
     const std::vector<HWND>& pageWidgets(int page) const;
     void showPage(int page);
@@ -104,11 +108,14 @@ private:
     void applyFont(HWND hwnd, HFONT font);
     void computePageRect(RECT& pageRect) const;
     void makeFonts();
+    void makeBrushes();
 
     HWND m_parent = nullptr;
     HWND m_tab = nullptr;
     HFONT m_bodyFont = nullptr;
     HFONT m_sectionFont = nullptr;
+    HBRUSH m_windowBrush = nullptr;
+    HBRUSH m_panelBrush = nullptr;
     std::vector<Item> m_items;
     std::vector<std::vector<HWND>> m_pageWidgets;
     std::vector<std::pair<int, std::vector<HWND>>> m_fieldWidgets;

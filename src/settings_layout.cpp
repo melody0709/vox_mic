@@ -4,6 +4,7 @@
 
 #include "settings_fields.h"
 #include "settings_metrics.h"
+#include "settings_theme.h"
 
 namespace metrics {
 namespace {
@@ -105,7 +106,8 @@ int Layout::pageContentHeightDesign(int page) {
 // ---------------------------------------------------------------------------
 
 void Layout::makeFonts() {
-    destroyFonts();
+    if (m_bodyFont) { DeleteObject(m_bodyFont); m_bodyFont = nullptr; }
+    if (m_sectionFont) { DeleteObject(m_sectionFont); m_sectionFont = nullptr; }
     const char* face = metrics::FontFamily;
     m_bodyFont = CreateFontA(-S(metrics::FontBody), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
                              FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
@@ -115,11 +117,19 @@ void Layout::makeFonts() {
                                 FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                                 CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                 DEFAULT_PITCH | FF_DONTCARE, face);
+    makeBrushes();
 }
 
-void Layout::destroyFonts() {
+void Layout::destroyResources() {
     if (m_bodyFont) { DeleteObject(m_bodyFont); m_bodyFont = nullptr; }
     if (m_sectionFont) { DeleteObject(m_sectionFont); m_sectionFont = nullptr; }
+    if (m_windowBrush) { DeleteObject(m_windowBrush); m_windowBrush = nullptr; }
+    if (m_panelBrush) { DeleteObject(m_panelBrush); m_panelBrush = nullptr; }
+}
+
+void Layout::makeBrushes() {
+    if (!m_windowBrush) m_windowBrush = CreateSolidBrush(theme::Window);
+    if (!m_panelBrush) m_panelBrush = CreateSolidBrush(theme::Panel);
 }
 
 void Layout::applyFont(HWND hwnd, HFONT font) {
@@ -451,7 +461,7 @@ void Layout::createPageContent(HWND parent, HINSTANCE instance, int page) {
                         instance, nullptr);
                     applyFont(box, m_bodyFont);
                     push(box, fld.id, 0, y + ctrlOffset, metrics::ToggleColW,
-                         metrics::ToggleH, TextRole::Transparent, false);
+                         metrics::ToggleH, TextRole::Opaque, false);
                     break;
                 }
                 case FieldKind::Text:

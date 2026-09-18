@@ -14,6 +14,7 @@
 #include "settings_fields.h"
 #include "settings_layout.h"
 #include "settings_metrics.h"
+#include "settings_theme.h"
 #include "startup_registration.h"
 #include "tray_icon.h"
 
@@ -35,22 +36,37 @@ struct SettingsDialogData {
     bool useSystemInputColors = false;
 };
 
+// High contrast is an accessibility setting, so when the user has it on the
+// window follows the system palette instead of the design tokens. Everywhere
+// else reads one token and names no colour of its own.
+static bool useSystemPalette(const SettingsDialogData* pData) {
+    return pData && pData->useSystemInputColors;
+}
+
 static COLORREF inputBackgroundColor(const SettingsDialogData* pData) {
-    return pData && pData->useSystemInputColors
-        ? GetSysColor(COLOR_WINDOW)
-        : RGB(255, 255, 255);
+    return useSystemPalette(pData) ? GetSysColor(COLOR_WINDOW) : theme::Panel;
 }
 
 static COLORREF inputTextColor(const SettingsDialogData* pData) {
-    return pData && pData->useSystemInputColors
-        ? GetSysColor(COLOR_WINDOWTEXT)
-        : RGB(32, 32, 32);
+    return useSystemPalette(pData) ? GetSysColor(COLOR_WINDOWTEXT)
+                                   : theme::TextPrimary;
+}
+
+static COLORREF labelTextColor(const SettingsDialogData* pData) {
+    return useSystemPalette(pData) ? GetSysColor(COLOR_BTNTEXT) : theme::TextPrimary;
+}
+
+static COLORREF hintTextColor(const SettingsDialogData* pData) {
+    return useSystemPalette(pData) ? GetSysColor(COLOR_GRAYTEXT) : theme::TextHint;
+}
+
+static COLORREF disabledTextColor(const SettingsDialogData* pData) {
+    return useSystemPalette(pData) ? GetSysColor(COLOR_GRAYTEXT)
+                                   : theme::TextDisabled;
 }
 
 static HBRUSH inputBackgroundBrush(const SettingsDialogData* pData) {
-    if (pData && pData->useSystemInputColors) {
-        return GetSysColorBrush(COLOR_WINDOW);
-    }
+    if (useSystemPalette(pData)) return GetSysColorBrush(COLOR_WINDOW);
     if (pData && pData->hInputBrush) return pData->hInputBrush;
     return (HBRUSH)GetStockObject(WHITE_BRUSH);
 }
@@ -247,23 +263,24 @@ static void updateProcessingChainUi(HWND hWnd) {
     }
 }
 
+// The backend status line is drawn in the engine's state colour, so it reads
+// like the tray icon: streaming = running, armed = ready-but-waiting, degraded
+// = fell back, idle = switched off.
 static COLORREF denoiseStatusColor(HWND hWnd) {
-    if (!isChecked(hWnd, IDC_CHECK_NR)) return RGB(128, 128, 128);
+    if (!isChecked(hWnd, IDC_CHECK_NR)) return theme::StateIdle;
 
     HWND combo = GetDlgItem(hWnd, IDC_COMBO_NR_BACKEND);
     const int selection = combo ? (int)SendMessageA(combo, CB_GETCURSEL, 0, 0) : 0;
     const bool available = g_appState.dpdfnetAvailable.load(std::memory_order_acquire);
     const bool effectiveIsDpdfnet =
         g_appState.denoiseEffectiveBackend.load(std::memory_order_acquire) == 1;
-    const COLORREF active = RGB(30, 120, 54);
-    const COLORREF pending = RGB(45, 92, 150);
     if (selection == 1) {
         if (g_appState.dpdfnetDegraded.load(std::memory_order_acquire) || !available) {
-            return RGB(168, 104, 24);
+            return theme::StateDegraded;
         }
-        return effectiveIsDpdfnet ? active : pending;
+        return effectiveIsDpdfnet ? theme::StateStreaming : theme::StateArmed;
     }
-    return effectiveIsDpdfnet ? pending : active;
+    return effectiveIsDpdfnet ? theme::StateArmed : theme::StateStreaming;
 }
 
 // Loading is on demand, so "unavailable" is the wrong word for the common case
@@ -806,7 +823,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 sizeof(highContrast), &highContrast, 0) != FALSE &&
             (highContrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
         if (!pData->useSystemInputColors) {
-            pData->hInputBrush = CreateSolidBrush(RGB(255, 255, 255));
+            pData->hInputBrush = CreateSolidBrush(theme::Panel);
         }
         SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)pData);
 
@@ -877,7 +894,9 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         const DRAWITEMSTRUCT* draw = (const DRAWITEMSTRUCT*)lParam;
         if (draw && draw->CtlID == IDC_LABEL_NR_BACKEND_STATUS) {
             FillRect(draw->hDC, &draw->rcItem,
-                GetSysColorBrush(COLOR_BTNFACE));
+                (pData && pData->layout.panelBrush())
+                    ? pData->layout.panelBrush()
+                    : GetSysColorBrush(COLOR_BTNFACE));
 
             HFONT oldFont = nullptr;
             if (pData && pData->layout.bodyFont()) {
@@ -918,24 +937,27 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
         // Nearly every text widget paints with a transparent background so it
         // blends into the page surface the layout puts behind it; the ones whose
-        // text changes at runtime take an opaque background so the previous,
-        // longer string is cleared before the new one is drawn.
+        // text changes at runtime take the surface colour as an opaque
+        // background so the previous, longer string is cleared first.
         const settings::TextRole role = settings::TextRoleOf(hCtrl);
-        const COLORREF roleText = IsWindowEnabled(hCtrl)
-                                      ? GetSysColor(COLOR_BTNTEXT)
-                                      : GetSysColor(COLOR_GRAYTEXT);
         if (role == settings::TextRole::Transparent) {
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, roleText);
+            SetTextColor(hdc, IsWindowEnabled(hCtrl) ? labelTextColor(pData)
+                                                     : disabledTextColor(pData));
             return (LRESULT)GetStockObject(NULL_BRUSH);
         }
         SetBkMode(hdc, OPAQUE);
-        SetBkColor(hdc, GetSysColor(COLOR_BTNFACE));
+        SetBkColor(hdc,
+            pData && pData->layout.panelBrush()
+                ? theme::Panel
+                : GetSysColor(COLOR_BTNFACE));
         SetTextColor(hdc, role == settings::TextRole::Hint
-                              ? (pData && pData->useSystemInputColors
-                                     ? GetSysColor(COLOR_GRAYTEXT)
-                                     : RGB(128, 128, 128))
-                              : roleText);
+                              ? hintTextColor(pData)
+                              : (IsWindowEnabled(hCtrl) ? labelTextColor(pData)
+                                                        : disabledTextColor(pData)));
+        if (pData && pData->layout.panelBrush()) {
+            return (LRESULT)pData->layout.panelBrush();
+        }
         return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
     }
 
@@ -947,7 +969,7 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SetBkColor(hdc, inputBackgroundColor(pData));
         SetTextColor(hdc, IsWindowEnabled(hCtrl)
             ? inputTextColor(pData)
-            : GetSysColor(COLOR_GRAYTEXT));
+            : disabledTextColor(pData));
         return (LRESULT)brush;
     }
 
@@ -959,8 +981,46 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
         SetBkColor(hdc, inputBackgroundColor(pData));
         SetTextColor(hdc, IsWindowEnabled(hCtrl)
             ? inputTextColor(pData)
-            : GetSysColor(COLOR_GRAYTEXT));
+            : disabledTextColor(pData));
         return (LRESULT)brush;
+    }
+
+    // Push buttons are painted by the theme, but the window still owns the
+    // background behind their rounded corners - without this the buttons carry
+    // a faint box of the wrong shade.
+    case WM_CTLCOLORBTN: {
+        HDC hdc = (HDC)wParam;
+        if (pData && pData->layout.windowBrush()) {
+            return (LRESULT)pData->layout.windowBrush();
+        }
+        SetBkMode(hdc, TRANSPARENT);
+        return (LRESULT)GetStockObject(NULL_BRUSH);
+    }
+
+    // The window class carries no background brush of its own, so the window
+    // fills itself here. That is also what stops the wrong-shade band that a
+    // default brush would paint between the frame and the tab control.
+    case WM_ERASEBKGND: {
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        HBRUSH brush = (pData && pData->layout.windowBrush())
+                           ? pData->layout.windowBrush()
+                           : GetSysColorBrush(COLOR_BTNFACE);
+        FillRect((HDC)wParam, &rc, brush);
+        return 1;
+    }
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        HBRUSH brush = (pData && pData->layout.windowBrush())
+                           ? pData->layout.windowBrush()
+                           : GetSysColorBrush(COLOR_BTNFACE);
+        FillRect(hdc, &rc, brush);
+        EndPaint(hWnd, &ps);
+        return 0;
     }
 
     case WM_NOTIFY: {
@@ -1114,8 +1174,8 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case WM_DESTROY:
         KillTimer(hWnd, ID_TIMER_BACKEND_STATUS);
         if (pData) {
-            // Fonts belong to the layout engine, which created them.
-            pData->layout.destroyFonts();
+            // Fonts and brushes belong to the layout engine, which made them.
+            pData->layout.destroyResources();
         }
         if (pData && pData->hInputBrush) {
             DeleteObject(pData->hInputBrush);
@@ -1147,7 +1207,10 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
     wc.hInstance = hInstance;
     wc.lpszClassName = SETTINGS_CLASS;
     wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    // No background brush on the class: the window paints itself in WM_PAINT
+    // and WM_ERASEBKGND with the theme's window colour, so nothing can show the
+    // wrong shade anywhere the theme does not reach.
+    wc.hbrBackground = nullptr;
     RegisterClassExA(&wc);
 
     HWND hWnd = CreateWindowExA(
