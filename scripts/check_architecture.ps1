@@ -28,18 +28,25 @@ $CMake = Join-Path $Root 'CMakeLists.txt'
 # ---------------------------------------------------------------- baselines
 # file path (relative to repo root) -> max allowed lines
 #
-# Raised once, deliberately, for refactor step B2 (the two hang-point fixes):
-# a bounded worker shutdown plus a diagnosable abandoned state cannot be
-# expressed inside the old line budget. Both raises are TEMPORARY and must be
-# handed back: B3 decomposes main.cpp into orchestration + platform layers and
-# B5 rewrites dpdfnet_processor.cpp behind an abstract backend, so by the end
-# of the refactor both files must sit BELOW their pre-B2 values (650 / 728).
+# Two entries were raised for refactor step B2 (the two hang-point fixes): a
+# bounded worker shutdown plus a diagnosable abandoned state does not fit the
+# old budget.
+#
+# Payback status, rechecked after the Slint work was dropped:
+#   main.cpp - PAID BACK. 638 lines, under the pre-B2 650, so the ceiling is
+#     restored to 650 instead of being left at the 655 it was raised to.
+#   dpdfnet_processor.cpp - STANDING DEBT. Still 814 against a pre-B2 728. The
+#     +86 buys the abandoned-worker handling. The plan repaid it with a backend
+#     abstraction in step B5, which was cancelled when Slint was dropped, so
+#     nothing pays it now. This file sits exactly ON its baseline: the next
+#     line added here fails the guard until the debt is repaid (by extracting
+#     the abandon logic) or the baseline is re-raised with a recorded decision.
 $LineBaselines = @{
     'AGENTS.md'                     = 145   # loaded in full every session; keep it a rule sheet, not a manual
     'src/settings_dialog.cpp'       = 1458
-    'src/main.cpp'                  = 655   # pre-B2: 650
+    'src/main.cpp'                  = 650   # pre-B2 value, restored; actual 638
     'src/mic_usage_monitor.cpp'     = 652
-    'src/dsp/dpdfnet_processor.cpp' = 814   # pre-B2: 728
+    'src/dsp/dpdfnet_processor.cpp' = 814   # pre-B2: 728 - standing debt, see above
 }
 
 # Measured 2026-09-17. Ratchet: these may only go DOWN. Raising one requires
