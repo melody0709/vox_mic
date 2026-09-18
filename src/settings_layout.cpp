@@ -125,11 +125,13 @@ void Layout::destroyResources() {
     if (m_sectionFont) { DeleteObject(m_sectionFont); m_sectionFont = nullptr; }
     if (m_windowBrush) { DeleteObject(m_windowBrush); m_windowBrush = nullptr; }
     if (m_panelBrush) { DeleteObject(m_panelBrush); m_panelBrush = nullptr; }
+    if (m_strokeBrush) { DeleteObject(m_strokeBrush); m_strokeBrush = nullptr; }
 }
 
 void Layout::makeBrushes() {
     if (!m_windowBrush) m_windowBrush = CreateSolidBrush(theme::Window);
     if (!m_panelBrush) m_panelBrush = CreateSolidBrush(theme::Panel);
+    if (!m_strokeBrush) m_strokeBrush = CreateSolidBrush(theme::Stroke);
 }
 
 void Layout::applyFont(HWND hwnd, HFONT font) {
@@ -315,7 +317,8 @@ void Layout::createChrome(HWND parent, HINSTANCE instance) {
     const int tabH = client.bottom - S(metrics::PadTop) - S(metrics::GapAfterTab) -
                      S(metrics::FooterH);
     m_tab = CreateWindowExA(
-        0, WC_TABCONTROLA, "", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0,
+        0, WC_TABCONTROLA, "",
+        WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP, 0, 0,
         tabW > 0 ? tabW : 1, tabH > 0 ? tabH : 1, parent,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TAB_MAIN)), instance,
         nullptr);

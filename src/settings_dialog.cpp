@@ -1019,6 +1019,15 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                            ? pData->layout.windowBrush()
                            : GetSysColorBrush(COLOR_BTNFACE);
         FillRect(hdc, &rc, brush);
+        // A hairline across the top of the footer band closes the page off from
+        // the button row. One physical pixel keeps it crisp at any DPI.
+        const int footerTop = rc.bottom - metrics::S(metrics::FooterH);
+        RECT divider = {metrics::S(metrics::PadX), footerTop,
+                        rc.right - metrics::S(metrics::PadX), footerTop + 1};
+        HBRUSH stroke = (pData && pData->layout.strokeBrush())
+                            ? pData->layout.strokeBrush()
+                            : GetSysColorBrush(COLOR_3DSHADOW);
+        FillRect(hdc, &divider, stroke);
         EndPaint(hWnd, &ps);
         return 0;
     }
@@ -1096,6 +1105,9 @@ static LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             break;
         }
         case IDC_BTN_CANCEL:
+        // IsDialogMessage turns the Escape key into an IDCANCEL command, so it
+        // has to land on the same path as the Cancel button.
+        case IDCANCEL:
             cancelSettings(hWnd);
             ShowWindow(hWnd, SW_HIDE);
             break;
@@ -1213,8 +1225,10 @@ HWND createSettingsWindow(HINSTANCE hInstance, Config* pConfig) {
     wc.hbrBackground = nullptr;
     RegisterClassExA(&wc);
 
+    // WS_EX_CONTROLPARENT lets IsDialogMessage walk the window's fields with
+    // the Tab key; without it the window has no tab order at all.
     HWND hWnd = CreateWindowExA(
-        WS_EX_DLGMODALFRAME,
+        WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT,
         SETTINGS_CLASS,
         "VoxMic - Settings",
         WS_POPUP | WS_CAPTION | WS_SYSMENU,

@@ -53,6 +53,7 @@ public:
 
     HBRUSH windowBrush() const { return m_windowBrush; }
     HBRUSH panelBrush() const { return m_panelBrush; }
+    HBRUSH strokeBrush() const { return m_strokeBrush; }
 
     const std::vector<HWND>& pageWidgets(int page) const;
     void showPage(int page);
@@ -116,6 +117,7 @@ private:
     HFONT m_sectionFont = nullptr;
     HBRUSH m_windowBrush = nullptr;
     HBRUSH m_panelBrush = nullptr;
+    HBRUSH m_strokeBrush = nullptr;
     std::vector<Item> m_items;
     std::vector<std::vector<HWND>> m_pageWidgets;
     std::vector<std::pair<int, std::vector<HWND>>> m_fieldWidgets;

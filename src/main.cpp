@@ -627,6 +627,11 @@ int main(int argc, char* argv[]) {
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
+        // Route the settings window's messages through IsDialogMessage so the
+        // Tab key walks its fields and Enter/Escape reach the default button -
+        // the window is not a dialog, so without this there is no tab order at
+        // all. It returns TRUE when it consumed the message itself.
+        if (IsDialogMessageA(hWnd, &msg)) continue;
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
