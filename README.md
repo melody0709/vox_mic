@@ -13,6 +13,10 @@ Android Phone Mic -> [VoxMic Source App] -> ADB -> This Program -> VB-CABLE -> W
                                     [DSP] RNNoise/DPDFNet -> HPF -> EQ -> Comp -> Limiter
 ```
 
+## v0.7.0 Settings UI regularization, Light Theme & C++23 Modernization
+
+Settings interface has been completely regularized with a declarative field specification and a unified DPI-aware layout engine. Windows application manifest integrates Common-Controls v6 for modern Win10/Win11 control rendering and PerMonitorV2 high-DPI scaling. Introduced a native light theme with design tokens, high contrast mode support, standard keyboard tab navigation, and optimized typography (Section: 15px, Body: 14px, Hint: 12px). The codebase is upgraded to ISO C++23, eliminating all global `extern` declarations, hardening worker threads with `std::jthread` / `stop_token`, and adding on-demand lazy loading for the DPDFNet neural denoising runtime.
+
 ## v0.6.8 Demand Mode memory stability
 
 Demand Mode uses one observer per Windows capture session. Existing sessions are enumerated once and later sessions arrive through Core Audio notifications; a 200 ms pass refreshes only already tracked states to repair missed or reordered state callbacks. Deactivation has a 400 ms grace period so rapid stop/start sequences do not discard the next recording. Signal amplitude is never used as an activity decision: a silent user is still an active capture session.
@@ -99,12 +103,12 @@ The vendored payload contains the sherpa-onnx C API header, three Windows x64 ru
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.8.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.7.0.apk"
 ```
 
 ## Performance
 
-| Metric | v0.6.8 |
+| Metric | v0.7.0 |
 |--------|--------|
 | CPU Idle | **0-0.1%** |
 | CPU Active | ~0.1% (DSP) |

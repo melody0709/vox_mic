@@ -13,6 +13,10 @@ Android 手机麦克风 → [VoxMic Source App] → ADB → 本程序 → VB-CAB
                                     [DSP] RNNoise/DPDFNet → HPF → EQ → Comp → Limiter
 ```
 
+## v0.7.0 设置界面规则化、浅色主题与 C++23 现代化
+
+设置界面实现彻底规则化，引入声明式字段表与 DPI 感知布局引擎。集成应用程序 manifest 启用 Common-Controls v6（现代 Win10/Win11 原生视觉样式）与 PerMonitorV2 高 DPI 缩放。落地基于设计 Token 的原生浅色主题、高对比度无障碍支持、标准键盘 Tab 导航环与规范字号阶梯（小节标题 15px、正文 14px、说明 12px）。项目代码升级至 ISO C++23 标准，消除全部全局 `extern` 声明（归零），采用 `std::jthread` / `stop_token` 加固有界退出，并实现 DPDFNet 神经网络降噪按需懒加载。
+
 ## v0.6.8 Demand Mode 内存稳定性
 
 Demand Mode 现在为每个 Windows 采集会话建立独立 observer。已有会话仅在初始化时枚举一次，后续会话通过 Core Audio 通知加入；200ms 周期校准只刷新已跟踪状态，以修复遗漏或乱序的状态回调。最后一个会话停止后保留 400ms 退出防抖，快速停止/重新开始不会把下一次录音丢弃。信号音量不再用于判断会话是否活跃，因此用户保持安静也不会错误关闭音频链路。
@@ -99,12 +103,12 @@ build.bat --package
 ```cmd
 cd android_app
 .\gradlew.bat assembleDebug --no-daemon --console=plain
-adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.6.8.apk"
+adb -s <serial> install -r "app\build\outputs\apk\debug\VoxMic_Source-v0.7.0.apk"
 ```
 
 ## 性能
 
-| 指标 | v0.6.8 |
+| 指标 | v0.7.0 |
 |------|--------|
 | CPU 空闲 | **0-0.1%** |
 | CPU 激活 | ~0.1% (DSP) |

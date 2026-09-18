@@ -2,6 +2,41 @@
 
 [简体中文](doc/zh-CN/CHANGELOG.md) | **English**
 
+## v0.7.0 (2026-09-17)
+
+### Settings UI regularization & native light theme
+
+| Feature / Fix | Description |
+|---------------|-------------|
+| **Declarative layout engine** | Replaced manual pixel coordinates with a single-source metrics table (`settings_metrics.h`), declarative field definitions (`settings_fields.h`), and an automated layout engine (`settings_layout.cpp`). Adding or adjusting settings requires only field declarations. |
+| **Comctl32 v6 & DPI scaling** | Added application manifest with Common-Controls v6 and PerMonitorV2 support. Controls now render with modern Windows 10/11 visual styles and scale crisply across display DPI tiers (100%, 125%, 150%, 200%). |
+| **Design tokens & typography** | Adopted a clean native light theme (`settings_theme.h`) on a 4px grid. Standardized typography hierarchy: Section title: 15 px (Semibold), Body text: 14 px, Hint text: 12 px (`Segoe UI`). |
+| **Accessibility & high contrast** | Full support for Windows High Contrast mode, aligning dynamic brushes and text rendering with system palette tokens (`COLOR_WINDOW`, `COLOR_BTNFACE`, `COLOR_WINDOWTEXT`, `COLOR_GRAYTEXT`). |
+| **Keyboard navigation & smoothness** | Standard Win32 dialog tab sequence (`Reset -> OK -> Cancel -> Apply -> Tab`), `IsDialogMessage` message pumping, and `WS_CLIPCHILDREN` flicker-free painting. |
+
+### C++23 modernization & architecture
+
+| Feature / Fix | Description |
+|---------------|-------------|
+| **C++23 standard** | Modernized project configuration and compilers to ISO C++23 standard. |
+| **Single-owner state** | Unified cross-thread shared state into `AppState`, eliminating all 30 legacy `extern` global declarations down to 0. |
+| **Thread safety & bounded exit** | Migrated worker threads to `std::jthread` with cooperative `stop_token`, guaranteeing clean shutdown without hanging. |
+| **Modern types** | Standardized buffer processing with `std::span` and configuration/pipe validation with `std::expected`. |
+
+### DPDFNet on-demand lazy load
+
+| Feature / Fix | Description |
+|---------------|-------------|
+| **On-demand loading** | Sherpa-onnx and ONNX Runtime libraries/models are loaded only when DPDFNet is active, and unloaded when switching to RNNoise or Off, dramatically minimizing idle memory usage. |
+
+### Release identity
+
+| Item | Description |
+|------|-------------|
+| **Version bump** | Bumped desktop and Android application to `0.7.0` / Android `versionCode=15`. |
+
+---
+
 ## v0.6.8 (2026-09-08)
 
 ### Demand Mode memory stability

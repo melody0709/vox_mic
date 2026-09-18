@@ -68,9 +68,9 @@ constexpr int ToggleColW = 240;  // paired checkboxes (240 * 2 <= 488)
 // Pixel height of the em box at 96 DPI. Negative in CreateFont means character
 // height, which is what we want - it keeps the rendered size predictable
 // instead of depending on the face's cell metrics.
-constexpr int FontBody = 12;
-constexpr int FontSection = 12;
-constexpr int FontHint = 11;
+constexpr int FontBody = 14;
+constexpr int FontSection = 15;
+constexpr int FontHint = 12;
 
 constexpr const char* FontFamily = "Segoe UI";
 

@@ -2,6 +2,41 @@
 
 **简体中文** | [English](../../CHANGELOG.md)
 
+## v0.7.0 (2026-09-17)
+
+### 设置界面规则化与原生浅色主题
+
+| 特性 / 修复 | 说明 |
+|-------------|------|
+| **声明式布局引擎** | 彻底消除手工像素定位，建立单一尺寸源指标表（`settings_metrics.h`）、声明式字段表（`settings_fields.h`）与自动布局引擎（`settings_layout.cpp`）。未来增删设置项仅需声明字段。 |
+| **Comctl32 v6 与 DPI 缩放** | 引入应用程序 manifest，开启 Common-Controls v6 与 PerMonitorV2 支持。控件获得现代 Windows 10/11 原生视觉样式，并在不同 DPI 档位（100%、125%、150%、200%）下保持清晰缩放。 |
+| **设计 Token 与字号阶梯** | 采用基于 4px 栅格的自研原生浅色主题（`settings_theme.h`）。落地标准化字号阶梯：小节标题 15 px (Semibold)、正文 14 px、说明文本 12 px（`Segoe UI`）。 |
+| **无障碍与高对比度支持** | 完整适配 Windows 高对比度黑/白模式，动态画刷与文字颜色自动对齐系统调色板标记（`COLOR_WINDOW`、`COLOR_BTNFACE`、`COLOR_WINDOWTEXT`、`COLOR_GRAYTEXT`）。 |
+| **键盘导航与防闪烁** | 标准 Win32 对话框 Tab 导航环（`Reset -> OK -> Cancel -> Apply -> Tab`），`IsDialogMessage` 消息分发，配合 `WS_CLIPCHILDREN` 消除刷新闪烁。 |
+
+### C++23 现代化与架构重构
+
+| 特性 / 修复 | 说明 |
+|-------------|------|
+| **C++23 标准演进** | 项目全面升级至 ISO C++23 标准编译。 |
+| **单一状态归属** | 跨线程共享状态统一归属 `AppState`，全量消除 30 处遗留 `extern` 全局声明，实现全局声明归零。 |
+| **线程安全与有界退出** | 工作线程迁移至 `std::jthread` 配合协同 `stop_token`，杜绝退出卡死隐患。 |
+| **现代类型支持** | 音频缓冲采用 `std::span`，配置与管道校验采用 `std::expected`。 |
+
+### DPDFNet 神经网络降噪按需懒加载
+
+| 特性 / 修复 | 说明 |
+|-------------|------|
+| **按需动态加载** | sherpa-onnx 与 ONNX Runtime 库/模型仅在设置中选用 DPDFNet 时动态加载，切换回 RNNoise 或 Off 时立即释放，大幅降低空闲常驻内存。 |
+
+### 发布身份
+
+| 项 | 说明 |
+|----|------|
+| **版本升级** | 桌面端与 Android 客户端同步升级为 `0.7.0` / Android `versionCode=15`。 |
+
+---
+
 ## v0.6.8 (2026-09-08)
 
 ### Demand Mode 内存稳定性

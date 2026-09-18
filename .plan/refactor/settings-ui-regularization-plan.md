@@ -11,6 +11,7 @@
 > 6. **高对比度无障碍模式（High Contrast）系统色全面对齐**：全面修复 `WM_CTLCOLORSTATIC`、`WM_CTLCOLORBTN`、`WM_ERASEBKGND`、`WM_PAINT`、`WM_DRAWITEM` 中对非高对比度主题刷的无条件写死问题；在开启高对比度时，自动对齐系统调色板（`COLOR_BTNFACE`、`COLOR_WINDOW`、`COLOR_WINDOWTEXT`、`COLOR_BTNTEXT`、`COLOR_GRAYTEXT`），杜绝高对比度黑底下的白字白底不可读 Bug。
 > 7. **窗口级防闪烁消除（WS_CLIPCHILDREN）**：为主设置窗口补充 `WS_CLIPCHILDREN` 窗口样式，防止主窗口重绘背景时全量擦除擦伤子控件引发的刷新闪烁。
 > 8. **动态联动与切页状态实时刷新**：`WM_COMMAND` 在任意 Checkbox 切换时均驱动全字段依赖求值；`WM_NOTIFY` 在切至 DSP 页时即刻触发后端与链式状态的同步刷新，消除延迟。
+> 9. **方案2字号阶梯落定（v0.7.0 发布）**：用户选定方案2字号层级，最终落地为 `FontSection: 15 px`（小节标题）、`FontBody: 14 px`（正文控件）、`FontHint: 12 px`（说明文字），随 v0.7.0 正式发布。
 > 上游分析（对标证据）：`.plan/refactor/settings-ui-benchmark-vs-voxtype.html`
 > 标注规则：`[已核实]` = 读过源码/二进制/全历史确认；`[推断]` = 待实测确认
 > 本方案**不复制 VoxType 的外观**。VoxType 只证明"这三件事在 Win32 原生控件上够用"。
@@ -77,7 +78,7 @@
 | 滑杆 | `WSlider` / `WValue` / `GapValue` | 180 / 48 / 8 | 滑杆宽 / 右侧数值宽 / 间距 |
 | 尾部槽 | `GapTrail` / `WTrailBtn` | 8 / 76 | 行内动作按钮（Refresh / Browse） |
 | 页脚 | `FooterH` / `FooterBtnW` | 56 / 76 | |
-| 字号 | `FontBody` / `FontHint` / `FontSection` | 13 / 12 / 13 (Semibold) | 单位 px，按 DPI 换算成 `-MulDiv` |
+| 字号 | `FontBody` / `FontHint` / `FontSection` | 14 / 12 / 15 (Semibold) | 方案2落定，单位 px，按 DPI 换算成 `-MulDiv` |
 | 圆角/描边 | `RadiusCtrl` / `StrokeHair` | 4 / 1 | |
 
 **行高只允许 3 档**（消除"一行一个高度"）：
